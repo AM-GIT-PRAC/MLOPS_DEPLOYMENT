@@ -1,0 +1,15 @@
+artifact_uri: file:///D:/DevOps/MLOPS/mlops-legoland/mlruns/465395607576814846/ec88bd9d4b9f4c8e9d721f7ae48254fd/artifacts
+end_time: 1746264067141
+entry_point_name: ''
+experiment_id: '465395607576814846'
+lifecycle_stage: active
+run_id: ec88bd9d4b9f4c8e9d721f7ae48254fd
+run_name: Random Forest Model
+run_uuid: ec88bd9d4b9f4c8e9d721f7ae48254fd
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1746264058779
+status: 3
+tags: []
+user_id: Arjun

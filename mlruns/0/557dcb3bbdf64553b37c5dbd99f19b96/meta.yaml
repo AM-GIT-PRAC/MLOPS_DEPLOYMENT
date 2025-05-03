@@ -1,0 +1,15 @@
+artifact_uri: file:///D:/DevOps/MLOPS/mlops-legoland/mlruns/0/557dcb3bbdf64553b37c5dbd99f19b96/artifacts
+end_time: 1746261877737
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 557dcb3bbdf64553b37c5dbd99f19b96
+run_name: abundant-gull-291
+run_uuid: 557dcb3bbdf64553b37c5dbd99f19b96
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1746261870380
+status: 4
+tags: []
+user_id: Arjun

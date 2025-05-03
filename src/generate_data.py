@@ -1,31 +1,28 @@
-# -*- coding: utf-8 -*-
+import os
+import pandas as pd
+import random
+from faker import Faker
 
-import pandas as pd      # Helps to create data tables like Lego trays ���
-import numpy as np       # Helps to do math, like picking random stuff ���
-import random            # Used for making random values (like surprise boxes!) ���
+fake = Faker()
 
-def generate_transactions(num_rows=1000):  # We're making 1000 fake transactions
-    data = []  # This is our Lego box — we’ll put each transaction (brick) into it
+def generate_transaction_data(num_samples=1000, fraud_ratio=0.3):
+    data = []
+    for _ in range(num_samples):
+        is_fraud = 1 if random.random() < fraud_ratio else 0
+        amount = round(random.uniform(1.0, 1000.0), 2)
+        merchant = random.choice(['Amazon', 'Walmart', 'eBay', 'Target', 'BestBuy'])
+        location = fake.city()
+        card_type = random.choice(['Visa', 'MasterCard', 'Amex'])
+        fraud_label = 'FRA' if is_fraud == 1 else 'NOR'
+        data.append([amount, merchant, location, card_type, fraud_label])
+    
+    df = pd.DataFrame(data, columns=['amount', 'merchant', 'location', 'card_type', 'is_fraud'])
 
-    for _ in range(num_rows):  # Repeat 1000 times
-        amount = round(random.uniform(1.0, 1000.0), 2)   # Lego brick: the amount of money
-        time = random.randint(1, 86400)                 # Lego brick: time in seconds
-        is_fraud = np.random.choice([0, 1], p=[0.97, 0.03])  # 3% chance it's fraud! ���
+    # Create folder if not exists
+    os.makedirs('data', exist_ok=True)
+    
+    df.to_csv('data/transactions.csv', index=False)
+    print("✅ Dataset created at data/transactions.csv")
 
-        # Build a transaction Lego brick:
-        data.append({
-            "transaction_time": time,
-            "transaction_amount": amount,
-            "location": random.choice(['USA', 'CAN', 'MEX', 'FRA', 'IND']),
-            "card_type": random.choice(['VISA', 'MASTERCARD', 'AMEX']),
-            "is_fraud": is_fraud
-        })
-
-    return pd.DataFrame(data)  # Make all those bricks into a table ���
-
-# This will only run when we call the file directly
-if __name__ == "__main__":
-    df = generate_transactions()
-    df.to_csv("data/transactions.csv", index=False)
-    print("✅ Fake transaction data generated!")
-
+if __name__ == '__main__':
+    generate_transaction_data()

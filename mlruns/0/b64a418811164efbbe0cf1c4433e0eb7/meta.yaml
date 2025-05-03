@@ -1,0 +1,15 @@
+artifact_uri: file:///D:/DevOps/MLOPS/mlops-legoland/mlruns/0/b64a418811164efbbe0cf1c4433e0eb7/artifacts
+end_time: 1746261562334
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: b64a418811164efbbe0cf1c4433e0eb7
+run_name: big-deer-737
+run_uuid: b64a418811164efbbe0cf1c4433e0eb7
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1746261562274
+status: 4
+tags: []
+user_id: Arjun
