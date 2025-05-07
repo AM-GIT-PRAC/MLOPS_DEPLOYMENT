@@ -1,0 +1,9 @@
+# Core ML and data packages
+pandas
+numpy
+scikit-learn
+matplotlib
+seaborn
+bentoml
+joblib
+mlflow

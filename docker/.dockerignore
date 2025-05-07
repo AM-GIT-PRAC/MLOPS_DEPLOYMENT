@@ -1,0 +1,7 @@
+.git
+__pycache__
+*.pyc
+mlruns/
+*.pkl
+*.delete.txt
+*.venv

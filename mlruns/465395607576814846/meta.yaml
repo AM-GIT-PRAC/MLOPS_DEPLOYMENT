@@ -1,6 +1,0 @@
-artifact_location: file:///D:/DevOps/MLOPS/mlops-legoland/mlruns/465395607576814846
-creation_time: 1746264058231
-experiment_id: '465395607576814846'
-last_update_time: 1746264058231
-lifecycle_stage: active
-name: fraud_detection

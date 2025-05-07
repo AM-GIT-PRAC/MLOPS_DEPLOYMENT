@@ -1,55 +1,61 @@
+# src/train_model.py
+
+import os
 import pandas as pd
-import numpy as np
-from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import accuracy_score
 import mlflow
 import mlflow.sklearn
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score
+import joblib
 
-# Load data
-df = pd.read_csv('data/transactions.csv')
+#  Set MLflow logging directory
+os.environ["MLFLOW_TRACKING_URI"] = "file:./mlruns"
 
-# Convert 'FRA' to 1, 'NOR' to 0
-df['is_fraud'] = df['is_fraud'].apply(lambda x: 1 if x == 'FRA' else 0)
+#  Load data
+data = pd.read_csv("data/transactions.csv")
+X = pd.get_dummies(data.drop("is_fraud", axis=1))
+y = data["is_fraud"]
 
-# Encode categorical columns
-cat_cols = ['merchant', 'location', 'card_type']
-encoder = LabelEncoder()
-for col in cat_cols:
-    df[col] = encoder.fit_transform(df[col])
-
-# Split features and target
-X = df.drop(columns=['is_fraud'])
-y = df['is_fraud']
-
-# Train-test split
+#  Train-test split
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# 📦 Enable autologging
-mlflow.set_experiment("fraud_detection")
+#  Models to train
+models = {
+    "random_forest": RandomForestClassifier(),
+    "logistic_regression": LogisticRegression(max_iter=200),
+    "gradient_boosting": GradientBoostingClassifier()
+}
 
-# 🚀 Run 1: Random Forest
-with mlflow.start_run(run_name="Random Forest Model"):
-    rf_model = RandomForestClassifier()
-    rf_model.fit(X_train, y_train)
-    rf_preds = rf_model.predict(X_test)
-    rf_acc = accuracy_score(y_test, rf_preds)
-    print("Random Forest Accuracy:", rf_acc)
+#  Start MLflow experiment
+mlflow.set_experiment("fraud-detection-legoland")
+run_scores = {}
+model_objects = {}
 
-    mlflow.log_param("model", "Random Forest")
-    mlflow.log_metric("accuracy", rf_acc)
-    mlflow.sklearn.log_model(rf_model, "model")
+for name, model in models.items():
+    with mlflow.start_run(run_name=name):
+        model.fit(X_train, y_train)
+        y_pred = model.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
 
-# 🚀 Run 2: Logistic Regression
-with mlflow.start_run(run_name="Logistic Regression Model"):
-    lr_model = LogisticRegression()
-    lr_model.fit(X_train, y_train)
-    lr_preds = lr_model.predict(X_test)
-    lr_acc = accuracy_score(y_test, lr_preds)
-    print("Logistic Regression Accuracy:", lr_acc)
+        mlflow.log_param("model_name", name)
+        mlflow.log_metric("accuracy", acc)
+        mlflow.sklearn.log_model(model, artifact_path="model")
 
-    mlflow.log_param("model", "Logistic Regression")
-    mlflow.log_metric("accuracy", lr_acc)
-    mlflow.sklearn.log_model(lr_model, "model")
+        run_scores[mlflow.active_run().info.run_id] = acc
+        model_objects[mlflow.active_run().info.run_id] = model
+
+        print(f"{name} trained. Accuracy: {acc}")
+
+#  Select best model
+best_run_id = max(run_scores, key=run_scores.get)
+best_accuracy = run_scores[best_run_id]
+best_model = model_objects[best_run_id]
+
+#  Save best model
+os.makedirs("models", exist_ok=True)
+joblib.dump(best_model, "models/best_model.pkl")
+
+print(f"\n Best model run ID: {best_run_id} with Accuracy: {best_accuracy}")
+print(" Best model saved to models/best_model.pkl")

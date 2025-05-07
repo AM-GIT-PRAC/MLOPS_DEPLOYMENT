@@ -1,0 +1,63 @@
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import LabelEncoder
+from sklearn.metrics import accuracy_score
+import mlflow
+import mlflow.sklearn
+import bentoml
+
+# Load data
+df = pd.read_csv('data/transactions.csv')
+
+# Convert 'FRA' to 1, 'NOR' to 0
+df['is_fraud'] = df['is_fraud'].apply(lambda x: 1 if x == 'FRA' else 0)
+
+# Encode categorical columns
+cat_cols = ['merchant', 'location', 'card_type']
+encoder = LabelEncoder()
+for col in cat_cols:
+    df[col] = encoder.fit_transform(df[col])
+
+# Split features and target
+X = df.drop(columns=['is_fraud'])
+y = df['is_fraud']
+
+# Train-test split
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# 📦 Enable autologging
+mlflow.set_experiment("fraud_detection")
+
+# 🚀 Run 1: Random Forest
+with mlflow.start_run(run_name="Random Forest Model"):
+    rf_model = RandomForestClassifier()
+    rf_model.fit(X_train, y_train)
+    rf_preds = rf_model.predict(X_test)
+    rf_acc = accuracy_score(y_test, rf_preds)
+    print("Random Forest Accuracy:", rf_acc)
+
+    mlflow.log_param("model", "Random Forest")
+    mlflow.log_metric("accuracy", rf_acc)
+    mlflow.sklearn.log_model(rf_model, "model")
+
+    bento_model_rf = bentoml.sklearn.save_model("fraud_rf_model", rf_model)
+    print("Random Forest model saved with BentoML:", bento_model_rf)
+
+# 🚀 Run 2: Logistic Regression
+with mlflow.start_run(run_name="Logistic Regression Model"):
+    lr_model = LogisticRegression()
+    lr_model.fit(X_train, y_train)
+    lr_preds = lr_model.predict(X_test)
+    lr_acc = accuracy_score(y_test, lr_preds)
+    print("Logistic Regression Accuracy:", lr_acc)
+
+    mlflow.log_param("model", "Logistic Regression")
+    mlflow.log_metric("accuracy", lr_acc)
+    mlflow.sklearn.log_model(lr_model, "model")
+
+    # Register with BentoML
+    bento_model = bentoml.sklearn.save_model("fraud_lr_model", lr_model)
+    print("Model saved with BentoML:", bento_model)

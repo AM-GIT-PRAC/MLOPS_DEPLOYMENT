@@ -1,0 +1,12 @@
+service: "src.fraud_service:svc"
+labels:
+  owner: "ml-team"
+  project: "fraud-detection"
+include:
+  - "models/"
+  - "src/"
+python:
+  packages:
+    - scikit-learn
+    - pandas
+    - joblib
