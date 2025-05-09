@@ -3,6 +3,7 @@ pipeline {
 
     environment {
         REPO_URL = 'https://github.com/AM-GIT-PRAC/MLOPS.git'
+        SCANNER_HOME = tool 'SonarQube Scanner' 
     }
 
     stages {
@@ -11,12 +12,21 @@ pipeline {
                 git credentialsId: 'github-creds', url: "${REPO_URL}", branch: 'main'
             }
         }
-
-        stage('Echo Structure') {
+        
+        stage('SonarQube Scan') {
             steps {
-                sh 'echo "Listing Project Structure:"'
-                sh 'ls -R'
+                withCredentials([string(credentialsId: 'sonarqube-creds', variable: 'SONAR_AUTH_TOKEN')]) {
+                    sh """
+                        ${SCANNER_HOME}/bin/sonar-scanner \
+                        -Dsonar.projectKey=mlops-legoland \
+                        -Dsonar.sources=src \
+                        -Dsonar.host.url=http://18.224.61.192:9000 \
+                        -Dsonar.login=$SONAR_AUTH_TOKEN
+                    """
+                }
             }
         }
+
+        
     }
 }
