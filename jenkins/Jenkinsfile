@@ -1,0 +1,22 @@
+pipeline {
+    agent any
+
+    environment {
+        REPO_URL = 'https://github.com/AM-GIT-PRAC/MLOPS.git'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git credentialsId: 'github-creds', url: "${REPO_URL}", branch: 'main'
+            }
+        }
+
+        stage('Echo Structure') {
+            steps {
+                sh 'echo "Listing Project Structure:"'
+                sh 'ls -R'
+            }
+        }
+    }
+}
