@@ -1,7 +1,13 @@
+data
+terraform/
+jenkins/
+mlruns/
 .git
+.gitignore
 __pycache__
 *.pyc
-mlruns/
+*.tmp
+*.log
 *.pkl
 *.delete.txt
 *.venv
