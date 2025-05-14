@@ -4,6 +4,7 @@ pipeline {
     environment {
         REPO_URL = 'https://github.com/AM-GIT-PRAC/MLOPS.git'
         SCANNER_HOME = tool 'SonarQube Scanner' 
+        MY_REPO_PATH = '/home/ubuntu/MLOPS'
     }
 
     stages {
@@ -39,6 +40,42 @@ pipeline {
             }
         }
         
+        stage('Build & Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'aws-creds', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    script {
+                        def IMAGE_NAME = "fraud-detection"
+                        def IMAGE_TAG = "latest"
+                        def AWS_REGION = "us-east-2"  // your region
+                        def ACCOUNT_ID = "354918408969"  // your AWS account ID
+                        def REPO_URI = "${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${IMAGE_NAME}"
+                        
+                        dir("${MY_REPO_PATH}") {
+                            sh '''
+                            echo "Logging in to ECR..."
+                            aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                            aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                            aws configure set default.region ''' + AWS_REGION + '''
+            
+                            aws ecr get-login-password --region ''' + AWS_REGION + ''' | docker login --username AWS --password-stdin ''' + REPO_URI + '''
+                            
+                            pwd
+                            ls -la
+                            
+                            echo "Building Docker image..."
+                            docker build -t ''' + IMAGE_NAME + ''':''' + IMAGE_TAG + ''' .
+            
+                            echo "Tagging image..."
+                            docker tag ''' + IMAGE_NAME + ''':''' + IMAGE_TAG + ''' ''' + REPO_URI + ''':''' + IMAGE_TAG + '''
+            
+                            echo "Pushing image to ECR..."
+                            docker push ''' + REPO_URI + ''':''' + IMAGE_TAG + '''
+                            '''
+                        }
+                    }
+                }
+            }
+        }
         /*
         stage('Terraform Init & Apply') {
             steps {
