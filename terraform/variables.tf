@@ -1,95 +1,79 @@
-#############################
-#       GENERAL CONFIG     #
-#############################
-
+##############################
+# General Configuration
+##############################
 variable "region" {
-  description = "AWS region to deploy resources"
   type        = string
-  default     = "us-east-2"
+  description = "AWS region"
 }
 
 variable "aws_account_id" {
-  description = "AWS Account ID used for ECR"
   type        = string
+  description = "Your AWS account ID"
 }
 
-
-#############################
-#         VPC CONFIG       #
-#############################
-
+##############################
+# VPC Configuration
+##############################
 variable "vpc_name" {
-  description = "Name of the VPC"
   type        = string
-  default     = "eks-vpc"
+  description = "Name of the VPC"
 }
 
 variable "vpc_cidr" {
-  description = "CIDR block for the VPC"
   type        = string
-  default     = "10.0.0.0/16"
+  description = "CIDR block for the VPC"
 }
 
-variable "azs" {
-  description = "Availability zones"
+variable "availability_zones" {
   type        = list(string)
-  default     = ["us-east-2a", "us-east-2b"]
+  description = "List of availability zones"
 }
 
 variable "public_subnets" {
-  description = "Public subnet CIDRs"
   type        = list(string)
-  default     = ["10.0.1.0/24", "10.0.2.0/24"]
+  description = "List of public subnet CIDRs"
 }
 
-
-#############################
-#      EKS CONFIG           #
-#############################
-
+##############################
+# EKS Cluster Configuration
+##############################
 variable "cluster_name" {
+  type        = string
   description = "Name of the EKS cluster"
-  type        = string
-  default     = "fraud-detection-eks"
 }
 
+##############################
+# Node Group Configuration
+##############################
 variable "node_group_name" {
-  description = "Name of the EKS node group"
   type        = string
-  default     = "eks-node-group"
+  description = "Name of the EKS node group"
 }
 
-variable "instance_type" {
-  description = "EC2 instance type for EKS nodes"
+variable "node_instance_type" {
   type        = string
-  default     = "t3.medium"
+  description = "EC2 instance type for nodes"
+}
+
+variable "desired_capacity" {
+  type        = number
+  description = "Desired number of nodes"
 }
 
 variable "min_size" {
-  description = "Minimum number of worker nodes"
   type        = number
-  default     = 1
+  description = "Minimum number of nodes"
 }
 
 variable "max_size" {
-  description = "Maximum number of worker nodes"
   type        = number
-  default     = 1
+  description = "Maximum number of nodes"
 }
 
-variable "desired_size" {
-  description = "Desired number of worker nodes"
-  type        = number
-  default     = 1
-}
-
-
-#############################
-#        ECR CONFIG         #
-#############################
-
+##############################
+# ECR Configuration
+##############################
 variable "ecr_repo_name" {
-  description = "Name of the ECR repository"
   type        = string
-  default     = "fraud-detection"
+  description = "Name of the ECR repository"
 }
