@@ -1,25 +1,13 @@
-# terraform.tfvars
-
-#######################
-# General AWS Config
-#######################
-aws_region      = "us-east-2"
-aws_account_id  = "354918408969"
-
-#######################
-# VPC Configuration
-#######################
-vpc_cidr_block        = "10.0.0.0/16"
-public_subnet_cidrs   = ["10.0.1.0/24", "10.0.2.0/24"]
-
-#######################
-# EKS Cluster
-#######################
-eks_cluster_name      = "mlops-eks-cluster"
-eks_node_group_name   = "mlops-node-group"
-instance_types        = ["t3.medium"]
-
-#######################
-# ECR Repository
-#######################
-ecr_repo_name         = "fraud-detection"
+region              = "us-east-2"
+aws_account_id      = "123456789012"
+vpc_name            = "eks-vpc"
+vpc_cidr            = "10.0.0.0/16"
+availability_zones  = ["us-east-2a", "us-east-2b"]
+public_subnets      = ["10.0.1.0/24", "10.0.2.0/24"]
+cluster_name        = "fraud-detection-cluster"
+node_group_name     = "eks-node-group"
+node_instance_type  = "t3.medium"
+desired_capacity    = 1
+min_size            = 1
+max_size            = 1
+ecr_repo_name       = "fraud_detection"
