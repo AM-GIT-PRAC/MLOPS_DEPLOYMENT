@@ -1,90 +1,119 @@
-
 provider "aws" {
-    region = var.region
+  region = var.aws_region
 }
 
-#vpc, subnets, networking
-
-module "vpc" {
-    source = "terraform-aws-modules/vpc/aws"
-    version = "5.19.0"
-    map_public_ip_on_launch = true
-
-    name = "eks-vpc"
-    cidr = "10.0.0.0/16"
-
-    azs = ["us-east-2a", "us-east-2b"]
-    public_subnets = ["10.0.1.0/24", "10.0.2.0/24"]
-
-    enable_dns_hostnames = true
-    enable_dns_support = true
+##############################
+# VPC
+##############################
+resource "aws_vpc" "main_vpc" {
+  cidr_block           = var.vpc_cidr_block
+  enable_dns_hostnames = true
+  enable_dns_support   = true
+  tags = {
+    Name = "mlops-vpc"
+  }
 }
 
-#eks cluster
-resource "aws_eks_cluster" "eks_cluster"{
-    name        = var.cluster_name
-    role_arn    = aws_iam_role.eks_cluster_role.arn
-    vpc_config {
-        subnet_ids = module.vpc.public_subnets
-    }
+resource "aws_subnet" "public_subnets" {
+  count             = length(var.public_subnet_cidrs)
+  vpc_id            = aws_vpc.main_vpc.id
+  cidr_block        = var.public_subnet_cidrs[count.index]
+  availability_zone = element(data.aws_availability_zones.available.names, count.index)
 
-    depends_on =[aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy]
+  tags = {
+    Name = "mlops-public-subnet-${count.index}"
+  }
 }
 
-#NODE GROUPS
-resource "aws_eks_node_group" "eks_nodes" {
-    cluster_name = aws_eks_cluster.eks_cluster.name
-    node_group_name = "eks-node-group"
-    node_role_arn = aws_iam_role.eks_node_role.arn
-    subnet_ids = module.vpc.public_subnets
+data "aws_availability_zones" "available" {}
 
-    scaling_config {
-        desired_size = 1
-        max_size = 1
-        min_size =1
-    }
-
-    instance_types =["t3.medium"]
+resource "aws_internet_gateway" "gw" {
+  vpc_id = aws_vpc.main_vpc.id
+  tags = {
+    Name = "mlops-igw"
+  }
 }
 
+resource "aws_route_table" "public" {
+  vpc_id = aws_vpc.main_vpc.id
+  tags = {
+    Name = "mlops-public-rt"
+  }
+}
 
-#Iam Roles/ Eks cluster roles
+resource "aws_route" "internet_access" {
+  route_table_id         = aws_route_table.public.id
+  destination_cidr_block = "0.0.0.0/0"
+  gateway_id             = aws_internet_gateway.gw.id
+}
 
+resource "aws_route_table_association" "public_subnet_assoc" {
+  count          = length(var.public_subnet_cidrs)
+  subnet_id      = aws_subnet.public_subnets[count.index].id
+  route_table_id = aws_route_table.public.id
+}
+
+##############################
+# ECR
+##############################
+resource "aws_ecr_repository" "mlops_repo" {
+  name = var.ecr_repo_name
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+
+  tags = {
+    Name = "mlops-ecr"
+  }
+}
+
+##############################
+# EKS Cluster
+##############################
+resource "aws_eks_cluster" "mlops_cluster" {
+  name     = var.eks_cluster_name
+  role_arn = aws_iam_role.eks_cluster_role.arn
+
+  vpc_config {
+    subnet_ids = aws_subnet.public_subnets[*].id
+  }
+
+  depends_on = [aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy]
+}
+
+resource "aws_eks_node_group" "mlops_nodes" {
+  cluster_name    = aws_eks_cluster.mlops_cluster.name
+  node_group_name = var.eks_node_group_name
+  node_role_arn   = aws_iam_role.eks_node_role.arn
+  subnet_ids      = aws_subnet.public_subnets[*].id
+  instance_types  = var.instance_types
+  scaling_config {
+    desired_size = 2
+    max_size     = 2
+    min_size     = 1
+  }
+
+  depends_on = [
+    aws_eks_cluster.mlops_cluster,
+    aws_iam_role_policy_attachment.eks_worker_node_AmazonEKSWorkerNodePolicy,
+    aws_iam_role_policy_attachment.eks_worker_node_AmazonEC2ContainerRegistryReadOnly,
+    aws_iam_role_policy_attachment.eks_worker_node_AmazonEKS_CNI_Policy
+  ]
+}
+
+##############################
+# IAM for EKS Cluster
+##############################
 resource "aws_iam_role" "eks_cluster_role" {
-    name = "eks_cluster_role"
-    assume_role_policy = data.aws_iam_policy_document.eks_cluster_assume.json
+  name = "eksClusterRole"
+
+  assume_role_policy = data.aws_iam_policy_document.eks_assume_role_policy.json
 }
 
-resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonEKSClusterPolicy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-  role       = aws_iam_role.eks_cluster_role.name
-}
-
-resource "aws_iam_role" "eks_node_role" {
-  name = "eks-node-role"
-  assume_role_policy = data.aws_iam_policy_document.eks_nodes_assume.json
-}
-
-resource "aws_iam_role_policy_attachment" "eks_node_AmazonEKSWorkerNodePolicy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
-  role       = aws_iam_role.eks_node_role.name
-}
-
-resource "aws_iam_role_policy_attachment" "eks_node_AmazonEC2ContainerRegistryReadOnly" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
-  role       = aws_iam_role.eks_node_role.name
-}
-
-resource "aws_iam_role_policy_attachment" "eks_node_AmazonEKSCNIPolicy" {
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
-  role       = aws_iam_role.eks_node_role.name
-}
-
-# IAM Assume Role Policies
-data "aws_iam_policy_document" "eks_cluster_assume" {
+data "aws_iam_policy_document" "eks_assume_role_policy" {
   statement {
     actions = ["sts:AssumeRole"]
-
     principals {
       type        = "Service"
       identifiers = ["eks.amazonaws.com"]
@@ -92,13 +121,41 @@ data "aws_iam_policy_document" "eks_cluster_assume" {
   }
 }
 
-data "aws_iam_policy_document" "eks_nodes_assume" {
+resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonEKSClusterPolicy" {
+  role       = aws_iam_role.eks_cluster_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+}
+
+##############################
+# IAM for EKS Node Group
+##############################
+resource "aws_iam_role" "eks_node_role" {
+  name = "eksNodeGroupRole"
+
+  assume_role_policy = data.aws_iam_policy_document.eks_node_assume_role.json
+}
+
+data "aws_iam_policy_document" "eks_node_assume_role" {
   statement {
     actions = ["sts:AssumeRole"]
-
     principals {
       type        = "Service"
       identifiers = ["ec2.amazonaws.com"]
     }
   }
+}
+
+resource "aws_iam_role_policy_attachment" "eks_worker_node_AmazonEKSWorkerNodePolicy" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+}
+
+resource "aws_iam_role_policy_attachment" "eks_worker_node_AmazonEC2ContainerRegistryReadOnly" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+}
+
+resource "aws_iam_role_policy_attachment" "eks_worker_node_AmazonEKS_CNI_Policy" {
+  role       = aws_iam_role.eks_node_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
 }
