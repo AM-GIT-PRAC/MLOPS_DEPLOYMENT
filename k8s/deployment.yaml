@@ -1,20 +1,20 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: fraud-detector-deployment
+  name: fraud-detection-deployment
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: fraud-detector
+      app: fraud-detection
   template:
     metadata:
       labels:
-        app: fraud-detector
+        app: fraud-detection
     spec:
       containers:
-        - name: fraud-detector
-          image: 354918408969.dkr.ecr.us-east-2.amazonaws.com/fraud-detector:latest
+        - name: fraud-detection
+          image: 354918408969.dkr.ecr.us-east-2.amazonaws.com/fraud-detection:latest
           ports:
             - containerPort: 3000
             - containerPort: 5000
