@@ -7,9 +7,11 @@ spec:
   selector:
     app: fraud-detection
   ports:
-    - protocol: TCP
-      port: 80
+    - name: web
+      protocol: TCP
+      port: 3000
       targetPort: 3000  # BentoML server
-    - protocol: TCP
-      port: 81
+    - name: api
+      protocol: TCP
+      port: 5000
       targetPort: 5000  # MLflow UI
