@@ -1,117 +1,60 @@
 provider "aws" {
-  region = var.aws_region
+  region = var.region
 }
 
-##############################
-# VPC
-##############################
-resource "aws_vpc" "main_vpc" {
-  cidr_block           = var.vpc_cidr_block
+#############################
+#       VPC CONFIG         #
+#############################
+
+module "vpc" {
+  source = "terraform-aws-modules/vpc/aws"
+  version = "5.19.0"
+
+  name                 = var.vpc_name
+  cidr                 = var.vpc_cidr
+  azs                  = var.azs
+  public_subnets       = var.public_subnets
   enable_dns_hostnames = true
   enable_dns_support   = true
-  tags = {
-    Name = "mlops-vpc"
-  }
+  map_public_ip_on_launch = true
 }
 
-resource "aws_subnet" "public_subnets" {
-  count             = length(var.public_subnet_cidrs)
-  vpc_id            = aws_vpc.main_vpc.id
-  cidr_block        = var.public_subnet_cidrs[count.index]
-  availability_zone = element(data.aws_availability_zones.available.names, count.index)
 
-  tags = {
-    Name = "mlops-public-subnet-${count.index}"
-  }
-}
+#############################
+#      IAM FOR EKS         #
+#############################
 
-data "aws_availability_zones" "available" {}
-
-resource "aws_internet_gateway" "gw" {
-  vpc_id = aws_vpc.main_vpc.id
-  tags = {
-    Name = "mlops-igw"
-  }
-}
-
-resource "aws_route_table" "public" {
-  vpc_id = aws_vpc.main_vpc.id
-  tags = {
-    Name = "mlops-public-rt"
-  }
-}
-
-resource "aws_route" "internet_access" {
-  route_table_id         = aws_route_table.public.id
-  destination_cidr_block = "0.0.0.0/0"
-  gateway_id             = aws_internet_gateway.gw.id
-}
-
-resource "aws_route_table_association" "public_subnet_assoc" {
-  count          = length(var.public_subnet_cidrs)
-  subnet_id      = aws_subnet.public_subnets[count.index].id
-  route_table_id = aws_route_table.public.id
-}
-
-##############################
-# ECR
-##############################
-resource "aws_ecr_repository" "mlops_repo" {
-  name = var.ecr_repo_name
-
-  image_scanning_configuration {
-    scan_on_push = true
-  }
-
-  tags = {
-    Name = "mlops-ecr"
-  }
-}
-
-##############################
-# EKS Cluster
-##############################
-resource "aws_eks_cluster" "mlops_cluster" {
-  name     = var.eks_cluster_name
-  role_arn = aws_iam_role.eks_cluster_role.arn
-
-  vpc_config {
-    subnet_ids = aws_subnet.public_subnets[*].id
-  }
-
-  depends_on = [aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy]
-}
-
-resource "aws_eks_node_group" "mlops_nodes" {
-  cluster_name    = aws_eks_cluster.mlops_cluster.name
-  node_group_name = var.eks_node_group_name
-  node_role_arn   = aws_iam_role.eks_node_role.arn
-  subnet_ids      = aws_subnet.public_subnets[*].id
-  instance_types  = var.instance_types
-  scaling_config {
-    desired_size = 2
-    max_size     = 2
-    min_size     = 1
-  }
-
-  depends_on = [
-    aws_eks_cluster.mlops_cluster,
-    aws_iam_role_policy_attachment.eks_worker_node_AmazonEKSWorkerNodePolicy,
-    aws_iam_role_policy_attachment.eks_worker_node_AmazonEC2ContainerRegistryReadOnly,
-    aws_iam_role_policy_attachment.eks_worker_node_AmazonEKS_CNI_Policy
-  ]
-}
-
-##############################
-# IAM for EKS Cluster
-##############################
 resource "aws_iam_role" "eks_cluster_role" {
-  name = "eksClusterRole"
-
-  assume_role_policy = data.aws_iam_policy_document.eks_assume_role_policy.json
+  name = "eks_cluster_role"
+  assume_role_policy = data.aws_iam_policy_document.eks_cluster_assume.json
 }
 
-data "aws_iam_policy_document" "eks_assume_role_policy" {
+resource "aws_iam_role" "eks_node_role" {
+  name = "eks_node_role"
+  assume_role_policy = data.aws_iam_policy_document.eks_nodes_assume.json
+}
+
+resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonEKSClusterPolicy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
+  role       = aws_iam_role.eks_cluster_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_node_AmazonEKSWorkerNodePolicy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+  role       = aws_iam_role.eks_node_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_node_AmazonEC2ContainerRegistryReadOnly" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+  role       = aws_iam_role.eks_node_role.name
+}
+
+resource "aws_iam_role_policy_attachment" "eks_node_AmazonEKSCNIPolicy" {
+  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+  role       = aws_iam_role.eks_node_role.name
+}
+
+data "aws_iam_policy_document" "eks_cluster_assume" {
   statement {
     actions = ["sts:AssumeRole"]
     principals {
@@ -121,21 +64,7 @@ data "aws_iam_policy_document" "eks_assume_role_policy" {
   }
 }
 
-resource "aws_iam_role_policy_attachment" "eks_cluster_AmazonEKSClusterPolicy" {
-  role       = aws_iam_role.eks_cluster_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSClusterPolicy"
-}
-
-##############################
-# IAM for EKS Node Group
-##############################
-resource "aws_iam_role" "eks_node_role" {
-  name = "eksNodeGroupRole"
-
-  assume_role_policy = data.aws_iam_policy_document.eks_node_assume_role.json
-}
-
-data "aws_iam_policy_document" "eks_node_assume_role" {
+data "aws_iam_policy_document" "eks_nodes_assume" {
   statement {
     actions = ["sts:AssumeRole"]
     principals {
@@ -145,17 +74,57 @@ data "aws_iam_policy_document" "eks_node_assume_role" {
   }
 }
 
-resource "aws_iam_role_policy_attachment" "eks_worker_node_AmazonEKSWorkerNodePolicy" {
-  role       = aws_iam_role.eks_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKSWorkerNodePolicy"
+
+#############################
+#        EKS CLUSTER       #
+#############################
+
+resource "aws_eks_cluster" "eks_cluster" {
+  name     = var.cluster_name
+  role_arn = aws_iam_role.eks_cluster_role.arn
+
+  vpc_config {
+    subnet_ids = module.vpc.public_subnets
+  }
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy
+  ]
 }
 
-resource "aws_iam_role_policy_attachment" "eks_worker_node_AmazonEC2ContainerRegistryReadOnly" {
-  role       = aws_iam_role.eks_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly"
+
+#############################
+#     EKS NODE GROUP       #
+#############################
+
+resource "aws_eks_node_group" "eks_nodes" {
+  cluster_name    = aws_eks_cluster.eks_cluster.name
+  node_group_name = var.node_group_name
+  node_role_arn   = aws_iam_role.eks_node_role.arn
+  subnet_ids      = module.vpc.public_subnets
+
+  scaling_config {
+    desired_size = var.desired_size
+    max_size     = var.max_size
+    min_size     = var.min_size
+  }
+
+  instance_types = [var.instance_type]
+
+  depends_on = [
+    aws_iam_role_policy_attachment.eks_node_AmazonEKSWorkerNodePolicy,
+    aws_iam_role_policy_attachment.eks_node_AmazonEC2ContainerRegistryReadOnly,
+    aws_iam_role_policy_attachment.eks_node_AmazonEKSCNIPolicy
+  ]
 }
 
-resource "aws_iam_role_policy_attachment" "eks_worker_node_AmazonEKS_CNI_Policy" {
-  role       = aws_iam_role.eks_node_role.name
-  policy_arn = "arn:aws:iam::aws:policy/AmazonEKS_CNI_Policy"
+
+#############################
+#         ECR              #
+#############################
+
+resource "aws_ecr_repository" "fraud_detection_repo" {
+  name = var.ecr_repo_name
+  image_tag_mutability = "MUTABLE"
+  force_delete = true
 }
