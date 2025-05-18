@@ -1,5 +1,6 @@
 data
 terraform2
+k8s
 terraform/
 jenkins/
 mlruns/
