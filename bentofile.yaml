@@ -5,6 +5,7 @@ labels:
 include:
   - "models/"
   - "src/"
+  - "requirements.txt"
 python:
   packages:
     - scikit-learn
@@ -12,3 +13,4 @@ python:
     - joblib
     - bentoml
     - mlflow
+    - numpy
