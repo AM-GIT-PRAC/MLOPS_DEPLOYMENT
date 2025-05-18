@@ -10,3 +10,5 @@ python:
     - scikit-learn
     - pandas
     - joblib
+    - bentoml
+    - mlflow
