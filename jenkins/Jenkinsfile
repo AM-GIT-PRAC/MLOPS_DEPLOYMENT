@@ -20,7 +20,7 @@ pipeline {
         stage('Load Environment Variables') {
             steps {
                 script {
-                    envVars = readFile("${ENV_VARS_FILE}").split("\n")
+                    def envVars = readFile("${ENV_VARS_FILE}").split("\n")
                     envVars.each {
                         if (it.trim() && it.contains("=")) {
                             def (key, value) = it.tokenize("=")
@@ -31,34 +31,27 @@ pipeline {
             }
         }
 
-        stage('Checkout') {
+        stage('Checkout Code') {
             steps {
                 git credentialsId: 'github-creds', url: "${env.GITHUB_REPO_URL}", branch: "${env.GIT_BRANCH}"
             }
         }
 
-        stage('Start SonarQube Locally (if needed)') {
+        stage('Trivy Scan - Source Code') {
             steps {
-                script {
-                    def sonarRunning = sh(script: "docker ps | grep sonarqube || true", returnStdout: true).trim()
-                    if (!sonarRunning) {
-                        sh '''
-                        docker run -d --name sonarqube \
-                            -e SONAR_ES_BOOTSTRAP_CHECKS_DISABLE=true \
-                            -p 9000:9000 sonarqube:lts
-                        sleep 30
-                        '''
-                    }
-                }
+                sh '''
+                echo "Running Trivy filesystem scan..."
+                trivy fs . > trivy-fs-report.txt || true
+                '''
             }
         }
 
-        stage('SonarQube Scan') {
+        stage('SonarQube Code Scan') {
             steps {
                 withCredentials([string(credentialsId: 'sonarqube-creds', variable: 'SONAR_AUTH_TOKEN')]) {
                     withSonarQubeEnv('SonarQube Server') {
                         sh """
-                            sonar-scanner \
+                        sonar-scanner \
                             -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                             -Dsonar.sources=src \
                             -Dsonar.host.url=${SONAR_HOST_URL} \
@@ -81,15 +74,6 @@ pipeline {
                         '''
                     }
                 }
-            }
-        }
-
-        stage('Trivy Vulnerability Scan') {
-            steps {
-                sh '''
-                trivy fs . > trivy-report.txt
-                echo "==== Trivy Scan Complete ===="
-                '''
             }
         }
 
@@ -116,12 +100,11 @@ pipeline {
         stage('Trivy Scan - Docker Image') {
             steps {
                 sh '''
-                echo "Running Trivy scan on built Docker image..."
-                trivy image ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} > trivy-image-report.txt
+                echo "Running Trivy scan on Docker image..."
+                trivy image ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG} > trivy-image-report.txt || true
                 '''
             }
         }
-
 
         stage('Deploy to Kubernetes') {
             steps {
@@ -131,19 +114,18 @@ pipeline {
                 '''
             }
         }
-
     }
 
     post {
         always {
-            echo 'Cleaning up...'
+            echo 'Cleaning up unused containers...'
             sh 'docker container prune -f || true'
         }
-        failure {
-            echo 'Pipeline failed!'
-        }
         success {
-            echo 'Pipeline completed successfully.'
+            echo '✅ Pipeline completed successfully.'
+        }
+        failure {
+            echo '❌ Pipeline failed. Please check logs.'
         }
     }
 }
