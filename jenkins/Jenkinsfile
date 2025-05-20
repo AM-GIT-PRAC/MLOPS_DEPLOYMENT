@@ -3,7 +3,7 @@ pipeline {
         dockerfile {
             filename 'jenkins/Dockerfile.jenkins'
             dir 'jenkins'
-            label 'built-in'
+            label 'built-in'  // Optional: you can specify a label if needed
         }
     }
 
@@ -39,12 +39,11 @@ pipeline {
 
         stage('Trivy Scan - Source Code') {
             steps {
-                node {
-                    sh '''
-                    echo "Running Trivy filesystem scan..."
-                    trivy fs . > trivy-fs-report.txt || true
-                    '''
-                }
+                // No need for the node block here
+                sh '''
+                echo "Running Trivy filesystem scan..."
+                trivy fs . > trivy-fs-report.txt || true
+                '''
             }
         }
 
