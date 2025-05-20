@@ -2,10 +2,8 @@ pipeline {
     agent {
         dockerfile {
             filename 'jenkins/Dockerfile.jenkins'
-            node {
-                dir 'jenkins'
-                label 'built-in'
-            }
+            dir 'jenkins'
+            label 'built-in'
         }
     }
 
