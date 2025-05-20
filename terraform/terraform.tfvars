@@ -2,7 +2,7 @@
 # General Configuration
 ##############################
 region         = "us-east-2"
-aws_account_id = "123456789012" # ✅ Replace with your actual AWS account ID
+aws_account_id = "354918408969" # ✅ Replace with your actual AWS account ID
 
 ##############################
 # VPC Configuration
