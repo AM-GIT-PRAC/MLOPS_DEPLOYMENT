@@ -7,12 +7,12 @@ export ECR_REPO_NAME="fraud-detection"
 export ECR_REPO_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}"
 
 # === GITHUB CONFIGURATION ===
-export GITHUB_REPO_URL="https://github.com/AM-GIT-PRAC/MLOPS.git"
-export GIT_BRANCH="main"
+export GITHUB_REPO_URL="https://github.com/AM-GIT-PRAC/MLOPS_DEPLOYMENT.git"
+export GIT_BRANCH="changes-test"
 
 # === SONARQUBE CONFIGURATION ===
 export SONAR_PROJECT_KEY="mlops-legoland"
-export SONAR_HOST_URL="http://18.224.61.192:9000"
+export SONAR_HOST_URL="http://3.148.241.50:9000"
 
 # === KUBERNETES CONFIGURATION ===
 export K8S_DEPLOYMENT_PATH="k8s/deployment.yaml"
