@@ -2,8 +2,10 @@ pipeline {
     agent {
         dockerfile {
             filename 'jenkins/Dockerfile.jenkins'
-            dir 'jenkins'
-            label 'built-in'
+            node {
+                dir 'jenkins'
+                label 'built-in'
+            }
         }
     }
 
@@ -39,10 +41,12 @@ pipeline {
 
         stage('Trivy Scan - Source Code') {
             steps {
-                sh '''
-                echo "Running Trivy filesystem scan..."
-                trivy fs . > trivy-fs-report.txt || true
-                '''
+                node {
+                    sh '''
+                    echo "Running Trivy filesystem scan..."
+                    trivy fs . > trivy-fs-report.txt || true
+                    '''
+                }
             }
         }
 
