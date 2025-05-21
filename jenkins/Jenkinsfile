@@ -4,7 +4,8 @@ pipeline {
             filename 'Dockerfile.jenkins'
             dir 'jenkins'
             label 'built-in'
-            args '-v /var/run/docker.sock:/var/run/docker.sock'
+            args '-v /var/run/docker.sock:/var/run/docker.sock -u jenkins:docker'
+            // Use jenkins user with docker group, preserve default entrypoint
         }
     }
 
@@ -14,14 +15,21 @@ pipeline {
 
     options {
         skipDefaultCheckout false // Enable default checkout
+        timestamps() // Add timestamps to logs for debugging
     }
 
     stages {
-        stage('Debug') {
+        stage('Debug Environment') {
             steps {
-                sh 'ls -l jenkins/Dockerfile.jenkins || echo "Dockerfile not found"'
-                sh 'ls -l ${ENV_VARS_FILE} || echo "Environment file not found"'
-                sh 'cat ${ENV_VARS_FILE} || echo "Failed to read environment file"'
+                sh '''
+                echo "Debugging environment..."
+                whoami
+                groups
+                docker ps
+                ls -l jenkins/Dockerfile.jenkins || echo "Dockerfile not found"
+                ls -l ${ENV_VARS_FILE} || echo "Environment file not found"
+                cat ${ENV_VARS_FILE} || echo "Failed to read environment file"
+                '''
             }
         }
 
@@ -35,6 +43,8 @@ pipeline {
                             env[key.trim()] = value.trim().replaceAll("\"", "")
                         }
                     }
+                    // Debug loaded variables
+                    sh 'env | grep -E "GITHUB_REPO_URL|GIT_BRANCH|SONAR|AWS_REGION|ECR|K8S"'
                 }
             }
         }
@@ -42,6 +52,7 @@ pipeline {
         stage('Checkout Code') {
             steps {
                 git credentialsId: 'github-creds', url: "${env.GITHUB_REPO_URL}", branch: "${env.GIT_BRANCH}"
+                sh 'git rev-parse HEAD' // Log commit hash for debugging
             }
         }
 
@@ -130,8 +141,13 @@ pipeline {
         always {
             node('built-in') {
                 archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyArchive: true
-                echo 'Cleaning up unused containers...'
-                sh 'docker container prune -f || true'
+                echo 'Cleaning up unused containers created by this pipeline...'
+                sh '''
+                # Store pipeline container ID
+                CONTAINER_ID=$(cat /proc/self/cgroup | grep docker | tail -1 | cut -d'/' -f3)
+                # Remove only stopped containers created by this pipeline
+                docker ps -a -q --filter "status=exited" | grep -v "${CONTAINER_ID}" | grep -v "$(docker ps -q --filter name=sonarqube)" | xargs -r docker rm -f || true
+                '''
             }
         }
         success {
