@@ -1,7 +1,7 @@
 pipeline {
     agent {
         dockerfile {
-            filename 'Dockerfile.jenkins' // Adjust if file is at jenkins/Dockerfile.jenkins
+            filename 'Dockerfile.jenkins'
             dir 'jenkins'
             label 'built-in'
             args '-v /var/run/docker.sock:/var/run/docker.sock'
@@ -20,7 +20,8 @@ pipeline {
         stage('Debug') {
             steps {
                 sh 'ls -l jenkins/Dockerfile.jenkins || echo "Dockerfile not found"'
-                sh 'cat ${ENV_VARS_FILE} || echo "Environment file not found"'
+                sh 'ls -l ${ENV_VARS_FILE} || echo "Environment file not found"'
+                sh 'cat ${ENV_VARS_FILE} || echo "Failed to read environment file"'
             }
         }
 
@@ -96,9 +97,9 @@ pipeline {
 
                     aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_URI}
 
-                    docker build -t ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} .
-                    docker tag ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
-                    docker push ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
+                    docker build -t ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} . || exit 1
+                    docker tag ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG} || exit 1
+                    docker push ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG} || exit 1
                     '''
                 }
             }
@@ -115,18 +116,20 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                sh '''
-                kubectl apply -f ${K8S_DEPLOYMENT_PATH} --namespace=${K8S_NAMESPACE}
-                kubectl apply -f ${K8S_SERVICE_PATH} --namespace=${K8S_NAMESPACE}
-                '''
+                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
+                    sh '''
+                    kubectl apply -f ${K8S_DEPLOYMENT_PATH} --namespace=${K8S_NAMESPACE}
+                    kubectl apply -f ${K8S_SERVICE_PATH} --namespace=${K8S_NAMESPACE}
+                    '''
+                }
             }
         }
     }
 
     post {
         always {
-            archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyArchive: true
             node('built-in') {
+                archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyArchive: true
                 echo 'Cleaning up unused containers...'
                 sh 'docker container prune -f || true'
             }
