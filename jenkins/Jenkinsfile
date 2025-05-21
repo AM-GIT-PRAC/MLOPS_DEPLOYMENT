@@ -1,9 +1,10 @@
 pipeline {
     agent {
         dockerfile {
-            filename '/Dockerfile.jenkins'
+            filename 'jenkins/Dockerfile.jenkins'
             dir 'jenkins'
-            label 'built-in'  // This label is used for the pipeline agent
+            label 'built-in'
+            args '-v /var/run/docker.sock:/var/run/docker.sock'
         }
     }
 
