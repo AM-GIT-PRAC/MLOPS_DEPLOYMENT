@@ -26,10 +26,13 @@ pipeline {
                 whoami
                 groups
                 docker ps
+                echo "Checking SonarQube accessibility..."
+                curl -I ${SONAR_HOST_URL} || echo "Warning: SonarQube at ${SONAR_HOST_URL} is not accessible"
                 ls -l jenkins/Dockerfile.jenkins || echo "Dockerfile not found"
                 ls -l ${ENV_VARS_FILE} || echo "Environment file not found"
                 cat ${ENV_VARS_FILE} || echo "Failed to read environment file"
                 sonar-scanner --version
+                helm version
                 '''
             }
         }
@@ -130,8 +133,11 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
                     sh '''
-                    kubectl apply -f ${K8S_DEPLOYMENT_PATH} --namespace=${K8S_NAMESPACE}
-                    kubectl apply -f ${K8S_SERVICE_PATH} --namespace=${K8S_NAMESPACE}
+                    helm upgrade --install fraud-detection k8s/helm \
+                        --namespace ${K8S_NAMESPACE} \
+                        --values k8s/helm/values.yaml \
+                        --set image.repository=${ECR_REPO_URI} \
+                        --set image.tag=${DOCKER_IMAGE_TAG}
                     '''
                 }
             }
