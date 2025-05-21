@@ -1,7 +1,7 @@
 pipeline {
     agent {
         dockerfile {
-            filename 'Dockerfile.jenkins'
+            filename 'Dockerfile.jenkins' // Adjust if file is at jenkins/Dockerfile.jenkins
             dir 'jenkins'
             label 'built-in'
             args '-v /var/run/docker.sock:/var/run/docker.sock'
@@ -9,14 +9,21 @@ pipeline {
     }
 
     environment {
-        ENV_VARS_FILE = 'jenkins-env-vars.sh'
+        ENV_VARS_FILE = 'jenkins/jenkins-env-vars.sh'
     }
 
     options {
-        skipDefaultCheckout true
+        skipDefaultCheckout false // Enable default checkout
     }
 
     stages {
+        stage('Debug') {
+            steps {
+                sh 'ls -l jenkins/Dockerfile.jenkins || echo "Dockerfile not found"'
+                sh 'cat ${ENV_VARS_FILE} || echo "Environment file not found"'
+            }
+        }
+
         stage('Load Environment Variables') {
             steps {
                 script {
@@ -69,8 +76,8 @@ pipeline {
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     dir("${env.TERRAFORM_DIR}") {
                         sh '''
-                        terraform init
-                        terraform apply -auto-approve
+                        terraform init || exit 1
+                        terraform apply -auto-approve || exit 1
                         '''
                     }
                 }
@@ -118,7 +125,8 @@ pipeline {
 
     post {
         always {
-            node('built-in') { // Use the same label as the pipeline agent
+            archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyArchive: true
+            node('built-in') {
                 echo 'Cleaning up unused containers...'
                 sh 'docker container prune -f || true'
             }
