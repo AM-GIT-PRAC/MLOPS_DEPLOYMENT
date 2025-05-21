@@ -1,7 +1,7 @@
 pipeline {
     agent {
         dockerfile {
-            filename 'jenkins/Dockerfile.jenkins'
+            filename 'Dockerfile.jenkins'
             dir 'jenkins'
             label 'built-in'
             args '-v /var/run/docker.sock:/var/run/docker.sock'
@@ -9,7 +9,7 @@ pipeline {
     }
 
     environment {
-        ENV_VARS_FILE = 'jenkins/jenkins-env-vars.sh'
+        ENV_VARS_FILE = 'jenkins-env-vars.sh'
     }
 
     options {
