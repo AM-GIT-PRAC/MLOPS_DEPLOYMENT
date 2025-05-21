@@ -29,6 +29,7 @@ pipeline {
                 ls -l jenkins/Dockerfile.jenkins || echo "Dockerfile not found"
                 ls -l ${ENV_VARS_FILE} || echo "Environment file not found"
                 cat ${ENV_VARS_FILE} || echo "Failed to read environment file"
+                sonar-scanner --version
                 '''
             }
         }
@@ -145,7 +146,7 @@ pipeline {
                 sh '''
                 # Store pipeline container ID
                 CONTAINER_ID=$(cat /proc/self/cgroup | grep docker | tail -1 | cut -d'/' -f3)
-                # Remove only stopped containers created by this pipeline
+                # Remove only stopped containers, excluding SonarQube
                 docker ps -a -q --filter "status=exited" | grep -v "${CONTAINER_ID}" | grep -v "$(docker ps -q --filter name=sonarqube)" | xargs -r docker rm -f || true
                 '''
             }
