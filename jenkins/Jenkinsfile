@@ -3,7 +3,7 @@ pipeline {
         dockerfile {
             filename 'jenkins/Dockerfile.jenkins'
             dir 'jenkins'
-            label 'built-in'  // This label is fine as is
+            label 'built-in'  // This label is used for the pipeline agent
         }
     }
 
@@ -117,8 +117,10 @@ pipeline {
 
     post {
         always {
-            echo 'Cleaning up unused containers...'
-            sh 'docker container prune -f || true'
+            node('built-in') { // Use the same label as the pipeline agent
+                echo 'Cleaning up unused containers...'
+                sh 'docker container prune -f || true'
+            }
         }
         success {
             echo '✅ Pipeline completed successfully.'
