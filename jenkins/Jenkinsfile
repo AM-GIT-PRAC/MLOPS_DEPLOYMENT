@@ -3,7 +3,7 @@ pipeline {
         dockerfile {
             filename 'jenkins/Dockerfile.jenkins'
             dir 'jenkins'
-            label 'built-in'  // Optional: you can specify a label if needed
+            label 'built-in'  // This label is fine as is
         }
     }
 
@@ -16,7 +16,6 @@ pipeline {
     }
 
     stages {
-
         stage('Load Environment Variables') {
             steps {
                 script {
@@ -39,12 +38,10 @@ pipeline {
 
         stage('Trivy Scan - Source Code') {
             steps {
-                node { // Wrap the sh step inside the node block
-                    sh '''
-                    echo "Running Trivy filesystem scan..."
-                    trivy fs . > trivy-fs-report.txt || true
-                    '''
-                }
+                sh '''
+                echo "Running Trivy filesystem scan..."
+                trivy fs . > trivy-fs-report.txt || true
+                '''
             }
         }
 
@@ -52,15 +49,13 @@ pipeline {
             steps {
                 withCredentials([string(credentialsId: 'sonarqube-creds', variable: 'SONAR_AUTH_TOKEN')]) {
                     withSonarQubeEnv('SonarQube Server') {
-                        node { // Wrap the sh step inside the node block
-                            sh """
-                            sonar-scanner \
-                                -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                                -Dsonar.sources=src \
-                                -Dsonar.host.url=${SONAR_HOST_URL} \
-                                -Dsonar.login=${SONAR_AUTH_TOKEN}
-                            """
-                        }
+                        sh """
+                        sonar-scanner \
+                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                            -Dsonar.sources=src \
+                            -Dsonar.host.url=${SONAR_HOST_URL} \
+                            -Dsonar.login=${SONAR_AUTH_TOKEN}
+                        """
                     }
                 }
             }
@@ -72,12 +67,10 @@ pipeline {
                     usernameVariable: 'AWS_ACCESS_KEY_ID',
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     dir("${env.TERRAFORM_DIR}") {
-                        node { // Wrap the sh step inside the node block
-                            sh '''
-                            terraform init
-                            terraform apply -auto-approve
-                            '''
-                        }
+                        sh '''
+                        terraform init
+                        terraform apply -auto-approve
+                        '''
                     }
                 }
             }
@@ -88,52 +81,44 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'aws-creds',
                     usernameVariable: 'AWS_ACCESS_KEY_ID',
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                    node { // Wrap the sh step inside the node block
-                        sh '''
-                        aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
-                        aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
-                        aws configure set default.region ${AWS_REGION}
+                    sh '''
+                    aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                    aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                    aws configure set default.region ${AWS_REGION}
 
-                        aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_URI}
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_URI}
 
-                        docker build -t ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} .
-                        docker tag ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
-                        docker push ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
-                        '''
-                    }
+                    docker build -t ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} .
+                    docker tag ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
+                    docker push ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
+                    '''
                 }
             }
         }
 
         stage('Trivy Scan - Docker Image') {
             steps {
-                node { // Wrap the sh step inside the node block
-                    sh '''
-                    echo "Running Trivy scan on Docker image..."
-                    trivy image ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG} > trivy-image-report.txt || true
-                    '''
-                }
+                sh '''
+                echo "Running Trivy scan on Docker image..."
+                trivy image ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG} > trivy-image-report.txt || true
+                '''
             }
         }
 
         stage('Deploy to Kubernetes') {
             steps {
-                node { // Wrap the sh step inside the node block
-                    sh '''
-                    kubectl apply -f ${K8S_DEPLOYMENT_PATH} --namespace=${K8S_NAMESPACE}
-                    kubectl apply -f ${K8S_SERVICE_PATH} --namespace=${K8S_NAMESPACE}
-                    '''
-                }
+                sh '''
+                kubectl apply -f ${K8S_DEPLOYMENT_PATH} --namespace=${K8S_NAMESPACE}
+                kubectl apply -f ${K8S_SERVICE_PATH} --namespace=${K8S_NAMESPACE}
+                '''
             }
         }
     }
 
     post {
         always {
-            node { // Wrap the cleanup part inside the node block
-                echo 'Cleaning up unused containers...'
-                sh 'docker container prune -f || true'
-            }
+            echo 'Cleaning up unused containers...'
+            sh 'docker container prune -f || true'
         }
         success {
             echo '✅ Pipeline completed successfully.'
