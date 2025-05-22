@@ -4,8 +4,8 @@ pipeline {
             filename 'Dockerfile.jenkins'
             dir 'jenkins'
             label 'built-in'
-            args '-v /var/run/docker.sock:/var/run/docker.sock -u jenkins:docker'
-            // Use jenkins user with docker group, preserve default entrypoint
+            args '-v /var/run/docker.sock:/var/run/docker.sock -u jenkins:docker --entrypoint=""'
+            // Override ENTRYPOINT to allow pipeline commands
         }
     }
 
@@ -32,6 +32,7 @@ pipeline {
                 ls -l ${ENV_VARS_FILE} || echo "Environment file not found"
                 cat ${ENV_VARS_FILE} || echo "Failed to read environment file"
                 sonar-scanner --version
+                helm version
                 '''
             }
         }
@@ -134,7 +135,9 @@ pipeline {
                     sh '''
                     helm upgrade --install fraud-detection k8s/helm \
                         --namespace ${K8S_NAMESPACE} \
-                        --values k8s/helm/values.yaml
+                        --values k8s/helm/values.yaml \
+                        --set image.repository=${ECR_REPO_URI} \
+                        --set image.tag=${DOCKER_IMAGE_TAG}
                     '''
                 }
             }
