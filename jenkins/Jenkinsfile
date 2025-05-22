@@ -32,7 +32,6 @@ pipeline {
                 ls -l ${ENV_VARS_FILE} || echo "Environment file not found"
                 cat ${ENV_VARS_FILE} || echo "Failed to read environment file"
                 sonar-scanner --version
-                helm version
                 '''
             }
         }
@@ -135,9 +134,7 @@ pipeline {
                     sh '''
                     helm upgrade --install fraud-detection k8s/helm \
                         --namespace ${K8S_NAMESPACE} \
-                        --values k8s/helm/values.yaml \
-                        --set image.repository=${ECR_REPO_URI} \
-                        --set image.tag=${DOCKER_IMAGE_TAG}
+                        --values k8s/helm/values.yaml
                     '''
                 }
             }
