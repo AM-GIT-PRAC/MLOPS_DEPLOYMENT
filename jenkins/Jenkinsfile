@@ -5,7 +5,6 @@ pipeline {
             dir 'jenkins'
             label 'built-in'
             args '-v /var/run/docker.sock:/var/run/docker.sock -u jenkins:docker --entrypoint=""'
-            // Override ENTRYPOINT to allow pipeline commands
         }
     }
 
@@ -14,8 +13,8 @@ pipeline {
     }
 
     options {
-        skipDefaultCheckout false // Enable default checkout
-        timestamps() // Add timestamps to logs for debugging
+        skipDefaultCheckout false
+        timestamps()
     }
 
     stages {
@@ -24,7 +23,14 @@ pipeline {
                 sh '''
                 echo "Debugging environment..."
                 whoami
+                id
                 groups
+                echo "Shell: $SHELL"
+                which bash
+                which sh
+                ls -ld /var/lib/jenkins/workspace/MLOPS
+                ls -l /var/lib/jenkins/workspace/MLOPS@tmp || echo "MLOPS@tmp not found"
+                touch /var/lib/jenkins/workspace/MLOPS@tmp/testfile || echo "Cannot write to workspace"
                 docker ps
                 echo "Checking SonarQube accessibility..."
                 curl -I ${SONAR_HOST_URL} || echo "Warning: SonarQube at ${SONAR_HOST_URL} is not accessible"
@@ -33,6 +39,10 @@ pipeline {
                 cat ${ENV_VARS_FILE} || echo "Failed to read environment file"
                 sonar-scanner --version
                 helm version
+                kubectl version --client
+                terraform version
+                trivy --version
+                aws --version
                 '''
             }
         }
@@ -47,7 +57,6 @@ pipeline {
                             env[key.trim()] = value.trim().replaceAll("\"", "")
                         }
                     }
-                    // Debug loaded variables
                     sh 'env | grep -E "GITHUB_REPO_URL|GIT_BRANCH|SONAR|AWS_REGION|ECR|K8S"'
                 }
             }
@@ -56,7 +65,7 @@ pipeline {
         stage('Checkout Code') {
             steps {
                 git credentialsId: 'github-creds', url: "${env.GITHUB_REPO_URL}", branch: "${env.GIT_BRANCH}"
-                sh 'git rev-parse HEAD' // Log commit hash for debugging
+                sh 'git rev-parse HEAD'
             }
         }
 
@@ -150,9 +159,7 @@ pipeline {
                 archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyArchive: true
                 echo 'Cleaning up unused containers created by this pipeline...'
                 sh '''
-                # Store pipeline container ID
                 CONTAINER_ID=$(cat /proc/self/cgroup | grep docker | tail -1 | cut -d'/' -f3)
-                # Remove only stopped containers, excluding SonarQube
                 docker ps -a -q --filter "status=exited" | grep -v "${CONTAINER_ID}" | grep -v "$(docker ps -q --filter name=sonarqube)" | xargs -r docker rm -f || true
                 '''
             }
