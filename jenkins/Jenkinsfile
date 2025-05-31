@@ -28,14 +28,21 @@ pipeline {
                 echo "Shell: $SHELL"
                 which bash
                 which sh
-                ls -l /bin/sh
+                ls -l /bin/sh /bin/bash
                 test -x /bin/sh && echo "/bin/sh is executable" || echo "/bin/sh is not executable"
+                test -x /bin/bash && echo "/bin/bash is executable" || echo "/bin/bash is not executable"
                 ls -ld /var/lib/jenkins/workspace/MLOPS
-                ls -l /var/lib/jenkins/workspace/MLOPS@tmp || echo "MLOPS@tmp not found"
+                ls -ld /var/lib/jenkins/workspace/MLOPS@tmp || echo "MLOPS@tmp not found"
+                ls -l /var/lib/jenkins/workspace/MLOPS@tmp || echo "No files in MLOPS@tmp"
                 touch /var/lib/jenkins/workspace/MLOPS@tmp/testfile || echo "Cannot write to workspace"
                 echo "Testing shell execution..."
                 /bin/sh -c "echo Shell test successful" || echo "Shell test failed"
-                env
+                /bin/bash -c "echo Bash test successful" || echo "Bash test failed"
+                echo "Testing durable task script..."
+                echo "echo Test" > /var/lib/jenkins/workspace/MLOPS@tmp/test.sh
+                chmod +x /var/lib/jenkins/workspace/MLOPS@tmp/test.sh
+                /bin/sh /var/lib/jenkins/workspace/MLOPS@tmp/test.sh || echo "Test script failed"
+                env | sort
                 docker ps
                 echo "Checking SonarQube accessibility..."
                 curl -I ${SONAR_HOST_URL} || echo "Warning: SonarQube at ${SONAR_HOST_URL} is not accessible"
