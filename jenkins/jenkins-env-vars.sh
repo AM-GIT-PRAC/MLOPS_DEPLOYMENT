@@ -12,7 +12,7 @@ export GIT_BRANCH="changes-test"
 
 # === SONARQUBE CONFIGURATION ===
 export SONAR_PROJECT_KEY="mlops-legoland"
-export SONAR_HOST_URL="http://3.22.216.119:9000/"
+export SONAR_HOST_URL="http://3.144.250.80:9000/"
 
 # === KUBERNETES CONFIGURATION ===
 export K8S_DEPLOYMENT_PATH="k8s/deployment.yaml"
