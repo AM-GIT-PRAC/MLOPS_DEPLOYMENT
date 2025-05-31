@@ -28,9 +28,14 @@ pipeline {
                 echo "Shell: $SHELL"
                 which bash
                 which sh
+                ls -l /bin/sh
+                test -x /bin/sh && echo "/bin/sh is executable" || echo "/bin/sh is not executable"
                 ls -ld /var/lib/jenkins/workspace/MLOPS
                 ls -l /var/lib/jenkins/workspace/MLOPS@tmp || echo "MLOPS@tmp not found"
                 touch /var/lib/jenkins/workspace/MLOPS@tmp/testfile || echo "Cannot write to workspace"
+                echo "Testing shell execution..."
+                /bin/sh -c "echo Shell test successful" || echo "Shell test failed"
+                env
                 docker ps
                 echo "Checking SonarQube accessibility..."
                 curl -I ${SONAR_HOST_URL} || echo "Warning: SonarQube at ${SONAR_HOST_URL} is not accessible"
