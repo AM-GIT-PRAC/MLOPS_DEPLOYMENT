@@ -57,14 +57,17 @@ RUN wget -O /tmp/sonar-scanner.zip https://binaries.sonarsource.com/Distribution
     && rm /tmp/sonar-scanner.zip
 
 # Ensure workspace permissions
-RUN mkdir -p /var/lib/jenkins/workspace && chown -R jenkins:jenkins /var/lib/jenkins/workspace && chmod -R 755 /var/lib/jenkins/workspace
+RUN mkdir -p /var/lib/jenkins/workspace/MLOPS@tmp && \
+    chown -R 111:113 /var/lib/jenkins/workspace && \
+    chmod -R 755 /var/lib/jenkins/workspace
 
 # Ensure shell compatibility
-RUN ln -sf /bin/bash /bin/sh
+RUN ln -sf /bin/bash /bin/sh && \
+    chmod +x /bin/sh /bin/bash
 
-# Allow Jenkins to run Docker by matching the host's docker group GID
-RUN groupadd -g $(stat -c %g /var/run/docker.sock 2>/dev/null || echo 113) docker || true \
-    && usermod -aG docker jenkins
+# Create docker group with fixed GID and add jenkins user
+RUN groupadd -g 113 docker || true && \
+    usermod -aG docker jenkins
 
 # Switch back to Jenkins user
 USER jenkins
