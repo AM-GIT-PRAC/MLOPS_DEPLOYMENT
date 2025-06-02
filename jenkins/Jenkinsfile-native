@@ -1,0 +1,208 @@
+pipeline {
+    agent any
+    
+    environment {
+        CONFIG_FILE = 'config/global-config.env'
+    }
+    
+    stages {
+        stage('Load Global Configuration') {
+            steps {
+                script {
+                    sh '''
+                    if [ -f ${CONFIG_FILE} ]; then
+                        source ${CONFIG_FILE}
+                        env | grep -E "AWS_|SONAR_|ECR_|K8S_|DOCKER_|MLFLOW_" > jenkins-runtime.env
+                    else
+                        echo "Error: Global config file not found!"
+                        exit 1
+                    fi
+                    '''
+                    
+                    def envFile = readFile('jenkins-runtime.env')
+                    envFile.split('\n').each { line ->
+                        if (line.contains('=')) {
+                            def (key, value) = line.split('=', 2)
+                            env[key] = value
+                        }
+                    }
+                    
+                    echo "✅ Configuration loaded successfully"
+                    sh 'env | grep -E "AWS_|SONAR_|ECR_|K8S_"'
+                }
+            }
+        }
+
+        stage('Checkout Code') {
+            steps {
+                git credentialsId: 'github-creds', url: "${env.GITHUB_REPO_URL}", branch: "${env.GIT_BRANCH}"
+                sh 'git rev-parse HEAD'
+            }
+        }
+
+        stage('Cleanup Old MLflow Runs') {
+            steps {
+                sh '''
+                python3 << EOF
+import mlflow
+import os
+import shutil
+
+mlflow.set_tracking_uri("file:./mlruns")
+
+try:
+    experiment = mlflow.get_experiment_by_name("${MLFLOW_EXPERIMENT_NAME}")
+    if experiment:
+        runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id])
+        
+        if len(runs) > int("${MAX_MLFLOW_RUNS_TO_KEEP}"):
+            old_runs = runs.iloc[int("${MAX_MLFLOW_RUNS_TO_KEEP}"):]
+            for _, run in old_runs.iterrows():
+                try:
+                    mlflow.delete_run(run.run_id)
+                    print(f"Deleted old run: {run.run_id}")
+                except Exception as e:
+                    print(f"Could not delete run {run.run_id}: {e}")
+        
+        print(f"✅ MLflow cleanup completed. Keeping {min(len(runs), int('${MAX_MLFLOW_RUNS_TO_KEEP}'))} runs.")
+    else:
+        print("Experiment not found, will be created during training.")
+        
+except Exception as e:
+    print(f"MLflow cleanup warning: {e}")
+EOF
+                '''
+            }
+        }
+
+        stage('Trivy Scan - Source Code') {
+            steps {
+                sh '''
+                echo "Running Trivy filesystem scan..."
+                trivy fs . > trivy-fs-report.txt || true
+                '''
+            }
+        }
+
+        stage('SonarQube Code Scan') {
+            steps {
+                withCredentials([string(credentialsId: 'sonarqube-creds', variable: 'SONAR_AUTH_TOKEN')]) {
+                    withSonarQubeEnv('SonarQube Server') {
+                        sh """
+                        sonar-scanner \
+                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                            -Dsonar.sources=src \
+                            -Dsonar.host.url=${SONAR_HOST_URL} \
+                            -Dsonar.login=${SONAR_AUTH_TOKEN}
+                        """
+                    }
+                }
+            }
+        }
+
+        stage('Train Model') {
+            steps {
+                sh '''
+                # Generate fresh data
+                python3 src/generate_data.py
+                
+                # Train new model
+                python3 src/train_model.py
+                
+                # Verify model exists
+                if [ ! -f "models/best_model.pkl" ]; then
+                    echo "❌ Model training failed"
+                    exit 1
+                fi
+                
+                echo "✅ Model training completed successfully"
+                '''
+            }
+        }
+
+        stage('Terraform Init & Apply') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    dir("${env.TERRAFORM_DIR}") {
+                        sh '''
+                        terraform init || exit 1
+                        terraform apply -auto-approve || exit 1
+                        '''
+                    }
+                }
+            }
+        }
+
+        stage('Build and Push Docker Image') {
+            steps {
+                withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+                    sh '''
+                    aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                    aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                    aws configure set default.region ${AWS_REGION}
+
+                    aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_URI}
+
+                    docker build -t ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} .
+                    docker tag ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
+                    docker push ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
+                    
+                    echo "✅ Docker image pushed: ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}"
+                    '''
+                }
+            }
+        }
+
+        stage('Trivy Scan - Docker Image') {
+            steps {
+                sh '''
+                echo "Running Trivy scan on Docker image..."
+                trivy image ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG} > trivy-image-report.txt || true
+                '''
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
+                    sh '''
+                    # Deploy with production values
+                    helm upgrade --install fraud-detection k8s/helm \
+                        --namespace ${K8S_NAMESPACE} \
+                        --create-namespace \
+                        --values k8s/helm/values-production.yaml \
+                        --set image.repository=${ECR_REPO_URI} \
+                        --set image.tag=${DOCKER_IMAGE_TAG}
+                    
+                    # Wait for deployment
+                    kubectl wait --for=condition=ready pod -l app=fraud-detection -n ${K8S_NAMESPACE} --timeout=300s
+                    
+                    # Get LoadBalancer URL
+                    echo "🌐 Getting API endpoint..."
+                    kubectl get svc fraud-detection -n ${K8S_NAMESPACE} -o wide
+                    
+                    EXTERNAL_IP=$(kubectl get svc fraud-detection -n ${K8S_NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || echo "pending")
+                    echo "🚀 API accessible at: http://${EXTERNAL_IP}/docs"
+                    '''
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyArchive: true
+            cleanWs()
+        }
+        success {
+            echo '✅ Pipeline completed successfully.'
+        }
+        failure {
+            echo '❌ Pipeline failed. Check logs for details.'
+        }
+    }
+}
