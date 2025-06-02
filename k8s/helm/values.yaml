@@ -1,13 +1,35 @@
+# Default values for fraud-detection
 replicaCount: 1
 
 image:
-  repository: <your_aws_account_id>.dkr.ecr.<region>.amazonaws.com/fraud-detection
+  repository: 354918408969.dkr.ecr.us-east-2.amazonaws.com/fraud-detection
   tag: latest
   pullPolicy: IfNotPresent
 
 service:
-  type: LoadBalancer
+  type: ClusterIP  # Default for development
   port: 80
-  targetPort: 8000
+  targetPort: 3000
 
-resources: {}
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+# Health checks
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 3000
+  initialDelaySeconds: 30
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: 3000
+  initialDelaySeconds: 10
+  periodSeconds: 10
