@@ -5,8 +5,12 @@ labels:
 include:
   - "models/"
   - "src/"
+  - "requirements.txt"
 python:
   packages:
     - scikit-learn
     - pandas
     - joblib
+    - bentoml
+    - mlflow
+    - numpy
