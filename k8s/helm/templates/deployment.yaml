@@ -2,6 +2,9 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: fraud-detection
+  labels:
+    app: fraud-detection
+    version: {{ .Values.image.tag }}
 spec:
   replicas: {{ .Values.replicaCount }}
   selector:
@@ -11,6 +14,7 @@ spec:
     metadata:
       labels:
         app: fraud-detection
+        version: {{ .Values.image.tag }}
     spec:
       containers:
         - name: fraud-detection
@@ -18,3 +22,23 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
             - containerPort: {{ .Values.service.targetPort }}
+              name: http
+              protocol: TCP
+          env:
+            - name: MODEL_NAME
+              value: "fraud_detector"
+            - name: LOG_LEVEL
+              value: "INFO"
+          {{- if .Values.resources }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- end }}
+          {{- if .Values.livenessProbe }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          {{- end }}
+          {{- if .Values.readinessProbe }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          {{- end }}
+      restartPolicy: Always
