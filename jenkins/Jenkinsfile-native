@@ -8,25 +8,32 @@ pipeline {
         VENV_PATH = '/var/lib/jenkins/mlops-venv'
     }
     
-    stages {
-        stage('Setup Python Environment') {
-            steps {
-                sh '''#!/bin/bash
-                echo "🐍 Setting up Python virtual environment..."
-                
-                if [ ! -d "${VENV_PATH}" ]; then
-                    echo "📦 Creating new virtual environment"
-                    python3 -m venv ${VENV_PATH}
-                fi
-                
-                source ${VENV_PATH}/bin/activate
-                pip install --upgrade pip
-                pip install mlflow bentoml scikit-learn pandas numpy joblib faker seaborn matplotlib
-                
-                echo "✅ Python environment ready"
-                '''
+    stage('Load Configuration') {
+        steps {
+            script {
+                if (fileExists(env.CONFIG_FILE)) {
+                    sh """#!/bin/bash
+                    echo "✅ Found config file: ${CONFIG_FILE}"
+                    source ${VENV_PATH}/bin/activate
+                    set -a
+                    source ${CONFIG_FILE}
+                    set +a
+                    env | grep -E "AWS_|SONAR_|ECR_|K8S_|DOCKER_|MLFLOW_|GITHUB_|GIT_" > jenkins-runtime.env
+                    echo "✅ Environment variables exported"
+                    """
+                    
+                    def props = readProperties file: 'jenkins-runtime.env'
+                    props.each { key, value ->
+                        env.setProperty(key, value)
+                    }
+                    echo "✅ Configuration loaded"
+                } else {
+                    sh "echo '❌ Config file not found at: ${CONFIG_FILE}'; ls -la config/ || echo 'Config dir missing'"
+                    error("Configuration file missing")
+                }
             }
         }
+    }
         
         stage('Load Configuration') {
             steps {
