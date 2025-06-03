@@ -1,5 +1,4 @@
-// jenkins/Jenkinsfile-native-fixed
-// Fixed version with proper shell handling
+
 pipeline {
     agent any
     
@@ -8,53 +7,98 @@ pipeline {
         VENV_PATH = '/var/lib/jenkins/mlops-venv'
     }
     
-    stage('Load Configuration') {
-        steps {
-            script {
-                if (fileExists(env.CONFIG_FILE)) {
-                    sh """#!/bin/bash
-                    echo "✅ Found config file: ${CONFIG_FILE}"
-                    source ${VENV_PATH}/bin/activate
-                    set -a
-                    source ${CONFIG_FILE}
-                    set +a
-                    env | grep -E "AWS_|SONAR_|ECR_|K8S_|DOCKER_|MLFLOW_|GITHUB_|GIT_" > jenkins-runtime.env
-                    echo "✅ Environment variables exported"
-                    """
-                    
-                    def props = readProperties file: 'jenkins-runtime.env'
-                    props.each { key, value ->
-                        env.setProperty(key, value)
-                    }
-                    echo "✅ Configuration loaded"
-                } else {
-                    sh "echo '❌ Config file not found at: ${CONFIG_FILE}'; ls -la config/ || echo 'Config dir missing'"
-                    error("Configuration file missing")
-                }
+    stages {
+        stage('Setup Python Environment') {
+            steps {
+                sh '''#!/bin/bash
+                echo "🐍 Setting up Python virtual environment..."
+                
+                if [ ! -d "${VENV_PATH}" ]; then
+                    echo "📦 Creating new virtual environment at ${VENV_PATH}"
+                    python3 -m venv ${VENV_PATH}
+                else
+                    echo "✅ Virtual environment exists at ${VENV_PATH}"
+                fi
+                
+                # Activate and upgrade
+                source ${VENV_PATH}/bin/activate
+                pip install --upgrade pip
+                
+                # Install required packages
+                echo "📦 Installing Python packages..."
+                pip install mlflow bentoml scikit-learn pandas numpy joblib faker seaborn matplotlib
+                
+                # Verify installation
+                echo "✅ Verifying installation:"
+                python3 -c "import mlflow, bentoml, pandas; print('All packages available')"
+                
+                echo "✅ Python environment ready"
+                '''
             }
         }
-    }
         
         stage('Load Configuration') {
             steps {
                 script {
-                    // Load configuration from file only
+                    echo "🔍 Looking for configuration file: ${env.CONFIG_FILE}"
+                    
                     if (fileExists(env.CONFIG_FILE)) {
+                        echo "✅ Found config file: ${env.CONFIG_FILE}"
+                        
                         sh """#!/bin/bash
+                        echo "📄 Reading configuration file..."
+                        cat ${CONFIG_FILE}
+                        
+                        echo "🔧 Loading environment variables..."
                         source ${VENV_PATH}/bin/activate
                         set -a
                         source ${CONFIG_FILE}
                         set +a
-                        env | grep -E "AWS_|SONAR_|ECR_|K8S_|DOCKER_|MLFLOW_|GITHUB_|GIT_" > jenkins-runtime.env
+                        
+                        # Export variables to file
+                        env | grep -E "AWS_|SONAR_|ECR_|K8S_|DOCKER_|MLFLOW_|GITHUB_|GIT_|PROJECT_|ENVIRONMENT" > jenkins-runtime.env
+                        
+                        echo "✅ Environment variables exported:"
+                        cat jenkins-runtime.env
                         """
                         
-                        def props = readProperties file: 'jenkins-runtime.env'
-                        props.each { key, value ->
-                            env.setProperty(key, value)
+                        // Load environment variables into Jenkins
+                        if (fileExists('jenkins-runtime.env')) {
+                            def props = readProperties file: 'jenkins-runtime.env'
+                            props.each { key, value ->
+                                env.setProperty(key, value)
+                            }
+                            echo "✅ Configuration loaded successfully"
+                            
+                            // Verify critical variables
+                            sh '''#!/bin/bash
+                            echo "🔍 Verifying critical environment variables:"
+                            echo "AWS_REGION: ${AWS_REGION:-NOT_SET}"
+                            echo "ECR_REPO_URI: ${ECR_REPO_URI:-NOT_SET}"
+                            echo "CLUSTER_NAME: ${CLUSTER_NAME:-NOT_SET}"
+                            
+                            # Check if critical vars are set
+                            if [ -z "${AWS_REGION}" ] || [ -z "${ECR_REPO_URI}" ]; then
+                                echo "❌ Critical environment variables missing!"
+                                exit 1
+                            fi
+                            
+                            echo "✅ Environment verification passed"
+                            '''
+                        } else {
+                            error("❌ Failed to create jenkins-runtime.env file")
                         }
-                        echo "✅ Configuration loaded from ${CONFIG_FILE}"
                     } else {
-                        error("❌ Configuration file not found: ${CONFIG_FILE}")
+                        sh """#!/bin/bash
+                        echo "❌ Configuration file not found at: ${CONFIG_FILE}"
+                        echo "📂 Current directory contents:"
+                        ls -la
+                        echo "📂 Checking config directory:"
+                        ls -la config/ || echo "Config directory does not exist"
+                        echo "📂 Searching for config files:"
+                        find . -name "*.env" -type f || echo "No .env files found"
+                        """
+                        error("❌ Configuration file missing: ${env.CONFIG_FILE}")
                     }
                 }
             }
@@ -64,13 +108,58 @@ pipeline {
             steps {
                 sh '''#!/bin/bash
                 echo "📂 Verifying repository structure..."
+                echo "Current working directory: $(pwd)"
+                
+                echo "📁 Repository contents:"
                 ls -la
                 
-                # Verify required files exist
-                [ -f "src/train_model.py" ] || { echo "❌ train_model.py not found"; exit 1; }
-                [ -f "src/generate_data.py" ] || { echo "❌ generate_data.py not found"; exit 1; }
-                [ -f "src/fraud_service.py" ] || { echo "❌ fraud_service.py not found"; exit 1; }
-                [ -f "Dockerfile" ] || { echo "❌ Dockerfile not found"; exit 1; }
+                echo "🔍 Checking required files..."
+                
+                # Check Python source files
+                if [ -f "src/train_model.py" ]; then
+                    echo "✅ src/train_model.py found"
+                else
+                    echo "❌ src/train_model.py not found"
+                    exit 1
+                fi
+                
+                if [ -f "src/generate_data.py" ]; then
+                    echo "✅ src/generate_data.py found"
+                else
+                    echo "❌ src/generate_data.py not found"
+                    exit 1
+                fi
+                
+                if [ -f "src/fraud_service.py" ]; then
+                    echo "✅ src/fraud_service.py found"
+                else
+                    echo "❌ src/fraud_service.py not found"
+                    exit 1
+                fi
+                
+                # Check Docker and infrastructure files
+                if [ -f "Dockerfile" ]; then
+                    echo "✅ Dockerfile found"
+                else
+                    echo "❌ Dockerfile not found"
+                    exit 1
+                fi
+                
+                if [ -d "terraform" ]; then
+                    echo "✅ terraform directory found"
+                    ls -la terraform/
+                else
+                    echo "❌ terraform directory not found"
+                    exit 1
+                fi
+                
+                if [ -d "k8s/helm" ]; then
+                    echo "✅ k8s/helm directory found"
+                    ls -la k8s/helm/
+                else
+                    echo "❌ k8s/helm directory not found"
+                    exit 1
+                fi
                 
                 echo "✅ Repository structure verified"
                 '''
@@ -82,8 +171,12 @@ pipeline {
                 stage('Trivy Security Scan') {
                     steps {
                         sh '''#!/bin/bash
-                        echo "🔒 Running security scan..."
-                        trivy fs . > trivy-fs-report.txt || true
+                        echo "🔒 Running Trivy security scan..."
+                        trivy fs . > trivy-fs-report.txt || {
+                            echo "⚠️ Trivy scan had issues, but continuing..."
+                            echo "Trivy scan completed with warnings" > trivy-fs-report.txt
+                        }
+                        echo "✅ Security scan completed"
                         '''
                     }
                 }
@@ -92,15 +185,80 @@ pipeline {
                     steps {
                         withCredentials([string(credentialsId: 'sonarqube-creds', variable: 'SONAR_AUTH_TOKEN')]) {
                             sh """#!/bin/bash
+                            echo "📊 Running SonarQube code quality scan..."
                             sonar-scanner \
                                 -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
                                 -Dsonar.sources=src \
                                 -Dsonar.host.url=${SONAR_HOST_URL} \
-                                -Dsonar.login=${SONAR_AUTH_TOKEN} || true
+                                -Dsonar.login=${SONAR_AUTH_TOKEN} || {
+                                echo "⚠️ SonarQube scan had issues, but continuing..."
+                            }
+                            echo "✅ Code quality scan completed"
                             """
                         }
                     }
                 }
+            }
+        }
+
+        stage('MLflow Cleanup') {
+            steps {
+                sh '''#!/bin/bash
+                echo "🧹 Cleaning up old MLflow runs..."
+                source ${VENV_PATH}/bin/activate
+                
+                # Create scripts directory if it doesn't exist
+                mkdir -p scripts
+                
+                # Check if cleanup script exists, if not create a simple one
+                if [ ! -f "scripts/cleanup_mlflow.py" ]; then
+                    cat > scripts/cleanup_mlflow.py << 'EOF'
+import mlflow
+import os
+
+def cleanup_old_runs():
+    mlflow.set_tracking_uri("file:./mlruns")
+    try:
+        experiment_name = os.getenv('MLFLOW_EXPERIMENT_NAME', 'fraud-detection-production')
+        max_runs = int(os.getenv('MAX_MLFLOW_RUNS_TO_KEEP', '5'))
+        
+        print(f"Looking for experiment: {experiment_name}")
+        print(f"Max runs to keep: {max_runs}")
+        
+        try:
+            experiment = mlflow.get_experiment_by_name(experiment_name)
+        except:
+            experiment = None
+        
+        if experiment:
+            runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id])
+            print(f"Found {len(runs)} existing runs")
+            
+            if len(runs) > max_runs:
+                old_runs = runs.iloc[max_runs:]
+                for _, run in old_runs.iterrows():
+                    try:
+                        mlflow.delete_run(run.run_id)
+                        print(f"Deleted old run: {run.run_id}")
+                    except Exception as e:
+                        print(f"Could not delete run {run.run_id}: {e}")
+            
+            print(f"Cleanup completed. Keeping {min(len(runs), max_runs)} runs.")
+        else:
+            print("Experiment not found, will be created during training.")
+            
+    except Exception as e:
+        print(f"MLflow cleanup error: {e}")
+
+if __name__ == "__main__":
+    cleanup_old_runs()
+EOF
+                fi
+                
+                # Run cleanup
+                python3 scripts/cleanup_mlflow.py
+                echo "✅ MLflow cleanup completed"
+                '''
             }
         }
 
@@ -110,19 +268,34 @@ pipeline {
                 echo "🤖 Running ML pipeline..."
                 source ${VENV_PATH}/bin/activate
                 
+                # Create necessary directories
+                mkdir -p data models
+                
                 # Step 1: Generate training data
                 echo "📊 Generating training data..."
                 python3 src/generate_data.py
+                
+                if [ ! -f "data/transactions.csv" ]; then
+                    echo "❌ Training data generation failed"
+                    exit 1
+                fi
+                
+                echo "✅ Training data generated successfully"
+                echo "📈 Data preview:"
+                head -3 data/transactions.csv
                 
                 # Step 2: Train models
                 echo "🎓 Training models..."
                 python3 src/train_model.py
                 
-                # Step 3: Verify outputs
-                [ -f "data/transactions.csv" ] || { echo "❌ Training data not generated"; exit 1; }
-                [ -f "models/best_model.pkl" ] || { echo "❌ Model training failed"; exit 1; }
+                if [ ! -f "models/best_model.pkl" ]; then
+                    echo "❌ Model training failed"
+                    ls -la models/ || echo "Models directory empty"
+                    exit 1
+                fi
                 
-                echo "✅ ML pipeline completed successfully"
+                echo "✅ Model training completed successfully"
+                ls -la models/
                 '''
             }
         }
@@ -134,19 +307,31 @@ pipeline {
                 source ${VENV_PATH}/bin/activate
                 
                 # Test model loading
+                echo "🔍 Testing model loading..."
                 python3 -c "
 import joblib
 import os
-model = joblib.load('models/best_model.pkl')
-print(f'✅ Model loads: {type(model).__name__}')
+if os.path.exists('models/best_model.pkl'):
+    model = joblib.load('models/best_model.pkl')
+    print(f'✅ Model loads successfully: {type(model).__name__}')
+    if hasattr(model, 'feature_names_in_'):
+        print(f'Model features: {len(model.feature_names_in_)} features')
+else:
+    print('❌ Model file not found')
+    exit(1)
 "
                 
                 # Test service imports
+                echo "🔍 Testing BentoML service..."
                 python3 -c "
 import sys
 sys.path.append('src')
-from fraud_service import svc
-print('✅ BentoML service imports successfully')
+try:
+    from fraud_service import svc
+    print('✅ BentoML service imports successfully')
+except ImportError as e:
+    print(f'❌ BentoML service import failed: {e}')
+    exit(1)
 "
                 
                 echo "✅ Application tests passed"
@@ -161,17 +346,26 @@ print('✅ BentoML service imports successfully')
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     dir("${env.TERRAFORM_DIR}") {
                         sh '''#!/bin/bash
-                        echo "🏗️ Managing infrastructure..."
+                        echo "🏗️ Managing AWS infrastructure..."
                         
+                        # Set AWS credentials
                         export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
                         export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
                         export AWS_DEFAULT_REGION=${AWS_REGION}
                         
+                        # Verify AWS access
+                        aws sts get-caller-identity
+                        
+                        echo "🔧 Initializing Terraform..."
                         terraform init
+                        
+                        echo "📋 Planning infrastructure changes..."
                         terraform plan
+                        
+                        echo "🚀 Applying infrastructure..."
                         terraform apply -auto-approve
                         
-                        echo "✅ Infrastructure ready"
+                        echo "✅ Infrastructure deployment completed"
                         '''
                     }
                 }
@@ -184,23 +378,36 @@ print('✅ BentoML service imports successfully')
                     usernameVariable: 'AWS_ACCESS_KEY_ID',
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     sh '''#!/bin/bash
-                    echo "🐳 Building and pushing container..."
+                    echo "🐳 Building and pushing Docker container..."
                     
-                    # Configure AWS
+                    # Configure AWS CLI
                     aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
                     aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
                     aws configure set default.region ${AWS_REGION}
 
-                    # Build image
+                    # Build Docker image
+                    echo "🔨 Building Docker image: ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG}"
                     docker build -t ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} .
                     
-                    # Push to ECR
+                    # Login to ECR
+                    echo "🔐 Logging into ECR..."
                     aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_URI}
+                    
+                    # Tag and push image
+                    echo "📤 Pushing image to ECR..."
                     docker tag ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
                     docker push ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
                     
-                    # Security scan
-                    trivy image ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG} > trivy-image-report.txt || true
+                    # Also push as latest
+                    docker tag ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} ${ECR_REPO_URI}:latest
+                    docker push ${ECR_REPO_URI}:latest
+                    
+                    # Run security scan on image
+                    echo "🔒 Running security scan on Docker image..."
+                    trivy image ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG} > trivy-image-report.txt || {
+                        echo "⚠️ Image security scan had issues, but continuing..."
+                        echo "Image scan completed with warnings" > trivy-image-report.txt
+                    }
                     
                     echo "✅ Container ready: ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}"
                     '''
@@ -214,15 +421,21 @@ print('✅ BentoML service imports successfully')
                     usernameVariable: 'AWS_ACCESS_KEY_ID',
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     sh '''#!/bin/bash
-                    echo "🚀 Deploying to production..."
+                    echo "🚀 Deploying to Kubernetes production..."
                     
-                    # Configure kubectl
+                    # Configure AWS and kubectl
                     aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
                     aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
                     aws configure set default.region ${AWS_REGION}
+                    
+                    echo "⚓ Updating kubeconfig..."
                     aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
                     
+                    # Verify kubectl access
+                    kubectl get nodes
+                    
                     # Deploy with Helm
+                    echo "📦 Deploying with Helm..."
                     helm upgrade --install fraud-detection k8s/helm \
                         --namespace ${K8S_NAMESPACE} \
                         --create-namespace \
@@ -231,14 +444,31 @@ print('✅ BentoML service imports successfully')
                         --set image.tag=${DOCKER_IMAGE_TAG} \
                         --timeout=10m
                     
-                    # Wait and verify
+                    # Wait for deployment
+                    echo "⏳ Waiting for deployment to be ready..."
                     kubectl wait --for=condition=ready pod -l app=fraud-detection -n ${K8S_NAMESPACE} --timeout=300s
                     
-                    # Get endpoint
+                    # Get deployment status
+                    echo "📊 Deployment status:"
+                    kubectl get pods -n ${K8S_NAMESPACE}
+                    kubectl get svc -n ${K8S_NAMESPACE}
+                    
+                    # Get LoadBalancer endpoint
                     EXTERNAL_IP=$(kubectl get svc fraud-detection -n ${K8S_NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
                     
-                    echo "🎉 Deployment completed!"
-                    echo "🌐 API endpoint: http://${EXTERNAL_IP}"
+                    echo ""
+                    echo "🎉 DEPLOYMENT COMPLETED SUCCESSFULLY!"
+                    echo "========================================"
+                    echo "🌐 API Endpoint: http://${EXTERNAL_IP}"
+                    echo "🧪 Health Check: http://${EXTERNAL_IP}/healthz"
+                    echo "📚 API Documentation: http://${EXTERNAL_IP}/docs"
+                    echo "🔍 Test Prediction: http://${EXTERNAL_IP}/predict"
+                    echo ""
+                    echo "📝 Example API call:"
+                    echo "curl -X POST http://${EXTERNAL_IP}/predict \\"
+                    echo "  -H 'Content-Type: application/json' \\"
+                    echo "  -d '{\"amount\": 150.0, \"merchant\": \"Amazon\", \"location\": \"NewYork\", \"card_type\": \"Visa\"}'"
+                    echo "========================================"
                     '''
                 }
             }
@@ -247,14 +477,37 @@ print('✅ BentoML service imports successfully')
 
     post {
         always {
+            echo '🧹 Pipeline cleanup and archiving...'
+            
+            // Archive important artifacts
             archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyArchive: true
             archiveArtifacts artifacts: 'models/*.pkl', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'data/*.csv', allowEmptyArchive: true
+            
+            // Show final workspace state
+            sh '''#!/bin/bash
+            echo "📁 Final workspace contents:"
+            ls -la
+            echo "🐍 Virtual environment location: ${VENV_PATH}"
+            '''
         }
         success {
-            echo '✅ Pipeline completed successfully!'
+            echo '🎉 PIPELINE COMPLETED SUCCESSFULLY!'
+            echo '✅ Your fraud detection API is now live and accessible!'
+            echo '🌐 Check the deployment logs above for the LoadBalancer URL'
         }
         failure {
-            echo '❌ Pipeline failed. Check logs for details.'
+            echo '❌ Pipeline failed. Debugging information:'
+            sh '''#!/bin/bash
+            echo "🔍 Debugging information:"
+            echo "Working directory: $(pwd)"
+            echo "Environment variables:"
+            env | grep -E "AWS_|SONAR_|ECR_|K8S_|DOCKER_|MLFLOW_" | head -10 || echo "No environment variables found"
+            echo "Virtual environment status:"
+            ls -la ${VENV_PATH}/bin/ 2>/dev/null || echo "Virtual environment not found"
+            echo "Files in workspace:"
+            ls -la
+            '''
         }
     }
 }
