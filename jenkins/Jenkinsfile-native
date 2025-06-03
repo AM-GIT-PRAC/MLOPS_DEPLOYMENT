@@ -30,22 +30,24 @@ pipeline {
                     # Generate dynamic Docker tag
                     export DOCKER_IMAGE_TAG="v$(date +%Y%m%d-%H%M%S)"
                     
-                    # Export individual variables for Jenkins
-                    echo "AWS_REGION=${AWS_REGION}" > config.properties
-                    echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> config.properties
-                    echo "ECR_REPO_NAME=${ECR_REPO_NAME}" >> config.properties
-                    echo "ECR_REPO_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}" >> config.properties
-                    echo "CLUSTER_NAME=${CLUSTER_NAME}" >> config.properties
-                    echo "K8S_NAMESPACE=${K8S_NAMESPACE}" >> config.properties
-                    echo "TERRAFORM_DIR=${TERRAFORM_DIR}" >> config.properties
-                    echo "SONAR_PROJECT_KEY=${SONAR_PROJECT_KEY}" >> config.properties
-                    echo "SONAR_HOST_URL=${SONAR_HOST_URL}" >> config.properties
-                    echo "DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG}" >> config.properties
-                    echo "MLFLOW_EXPERIMENT_NAME=${MLFLOW_EXPERIMENT_NAME}" >> config.properties
-                    echo "MAX_MLFLOW_RUNS_TO_KEEP=${MAX_MLFLOW_RUNS_TO_KEEP}" >> config.properties
+                    # Create environment variables file for Jenkins
+                    cat > env.properties << EOF
+AWS_REGION=${AWS_REGION}
+AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}
+ECR_REPO_NAME=${ECR_REPO_NAME}
+ECR_REPO_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}
+CLUSTER_NAME=${CLUSTER_NAME}
+K8S_NAMESPACE=${K8S_NAMESPACE}
+TERRAFORM_DIR=${TERRAFORM_DIR}
+SONAR_PROJECT_KEY=${SONAR_PROJECT_KEY}
+SONAR_HOST_URL=${SONAR_HOST_URL}
+DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG}
+MLFLOW_EXPERIMENT_NAME=${MLFLOW_EXPERIMENT_NAME}
+MAX_MLFLOW_RUNS_TO_KEEP=${MAX_MLFLOW_RUNS_TO_KEEP}
+EOF
                     
                     echo "✅ Configuration loaded:"
-                    cat config.properties
+                    cat env.properties
                     
                     # Verify critical variables
                     if [ -z "${AWS_REGION}" ] || [ -z "${CLUSTER_NAME}" ] || [ -z "${ECR_REPO_NAME}" ]; then
@@ -61,20 +63,24 @@ pipeline {
                 '''
                 
                 script {
-                    // Read the simple properties file
-                    def props = readProperties file: 'config.properties'
+                    // Read environment variables using basic shell commands
+                    def envContent = sh(returnStdout: true, script: 'cat env.properties').trim()
                     
-                    // Set each property in Jenkins environment
-                    props.each { key, value ->
-                        env.setProperty(key, value)
-                        echo "Loaded: ${key} = ${value}"
+                    // Parse each line and set environment variables
+                    envContent.split('\n').each { line ->
+                        if (line.contains('=')) {
+                            def parts = line.split('=', 2)
+                            def key = parts[0].trim()
+                            def value = parts[1].trim()
+                            env.setProperty(key, value)
+                            echo "Loaded: ${key} = ${value}"
+                        }
                     }
                     
                     echo "✅ All configuration loaded successfully"
                 }
             }
         }
-
 
         stage('Code Quality & Security') {
             parallel {
