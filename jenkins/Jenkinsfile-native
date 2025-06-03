@@ -7,84 +7,74 @@ pipeline {
     }
     
     stages {
+
         stage('Setup & Load Configuration') {
             steps {
-                script {
-                    // Setup Python environment
-                    sh '''#!/bin/bash
-                    echo "🐍 Setting up Python environment..."
-                    if [ ! -d "${VENV_PATH}" ]; then
-                        python3 -m venv ${VENV_PATH}
-                    fi
-                    source ${VENV_PATH}/bin/activate
-                    pip install --upgrade pip
-                    pip install mlflow bentoml scikit-learn pandas numpy joblib faker seaborn matplotlib
-                    '''
+                sh '''#!/bin/bash
+                echo "🐍 Setting up Python environment..."
+                if [ ! -d "${VENV_PATH}" ]; then
+                    python3 -m venv ${VENV_PATH}
+                fi
+                source ${VENV_PATH}/bin/activate
+                pip install --upgrade pip
+                pip install mlflow bentoml scikit-learn pandas numpy joblib faker seaborn matplotlib
+                echo "✅ Python environment ready"
+                
+                echo "🔧 Loading configuration..."
+                if [ -f "${CONFIG_FILE}" ]; then
+                    # Source the config file
+                    set -a
+                    source ${CONFIG_FILE}
+                    set +a
                     
-                    // Load configuration properly
-                    if (fileExists(env.CONFIG_FILE)) {
-                        sh '''#!/bin/bash
-                        echo "🔧 Loading configuration from ${CONFIG_FILE}..."
-                        
-                        # Source config and export all variables
-                        set -a
-                        source ${CONFIG_FILE}
-                        set +a
-                        
-                        # Generate dynamic Docker tag
-                        export DOCKER_IMAGE_TAG="v$(date +%Y%m%d-%H%M%S)"
-                        
-                        # Export all config variables to Jenkins env file
-                        cat > jenkins-config.env << EOF
-AWS_REGION=${AWS_REGION}
-AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}
-ECR_REPO_NAME=${ECR_REPO_NAME}
-ECR_REPO_URI=${ECR_REPO_URI}
-CLUSTER_NAME=${CLUSTER_NAME}
-K8S_NAMESPACE=${K8S_NAMESPACE}
-TERRAFORM_DIR=${TERRAFORM_DIR}
-SONAR_PROJECT_KEY=${SONAR_PROJECT_KEY}
-SONAR_HOST_URL=${SONAR_HOST_URL}
-DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG}
-MLFLOW_EXPERIMENT_NAME=${MLFLOW_EXPERIMENT_NAME}
-MAX_MLFLOW_RUNS_TO_KEEP=${MAX_MLFLOW_RUNS_TO_KEEP}
-EOF
-                        
-                        echo "✅ Configuration exported to jenkins-config.env"
-                        cat jenkins-config.env
-                        '''
-                        
-                        // Load variables into Jenkins environment
-                        def configProps = readProperties file: 'jenkins-config.env'
-                        configProps.each { key, value ->
-                            env.setProperty(key, value)
-                        }
-                        
-                        echo "✅ Configuration loaded into Jenkins environment"
-                        
-                        // Verify critical variables
-                        sh '''#!/bin/bash
-                        echo "🔍 Verifying loaded variables:"
-                        echo "AWS_REGION: ${AWS_REGION}"
-                        echo "CLUSTER_NAME: ${CLUSTER_NAME}"
-                        echo "ECR_REPO_URI: ${ECR_REPO_URI}"
-                        echo "SONAR_HOST_URL: ${SONAR_HOST_URL}"
-                        echo "DOCKER_IMAGE_TAG: ${DOCKER_IMAGE_TAG}"
-                        
-                        # Fail if critical variables are missing
-                        if [ -z "${AWS_REGION}" ] || [ -z "${CLUSTER_NAME}" ] || [ -z "${ECR_REPO_URI}" ]; then
-                            echo "❌ Critical configuration variables are missing!"
-                            exit 1
-                        fi
-                        
-                        echo "✅ All critical variables verified"
-                        '''
-                    } else {
-                        error("❌ Configuration file not found: ${env.CONFIG_FILE}")
+                    # Generate dynamic Docker tag
+                    export DOCKER_IMAGE_TAG="v$(date +%Y%m%d-%H%M%S)"
+                    
+                    # Export individual variables for Jenkins
+                    echo "AWS_REGION=${AWS_REGION}" > config.properties
+                    echo "AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID}" >> config.properties
+                    echo "ECR_REPO_NAME=${ECR_REPO_NAME}" >> config.properties
+                    echo "ECR_REPO_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}" >> config.properties
+                    echo "CLUSTER_NAME=${CLUSTER_NAME}" >> config.properties
+                    echo "K8S_NAMESPACE=${K8S_NAMESPACE}" >> config.properties
+                    echo "TERRAFORM_DIR=${TERRAFORM_DIR}" >> config.properties
+                    echo "SONAR_PROJECT_KEY=${SONAR_PROJECT_KEY}" >> config.properties
+                    echo "SONAR_HOST_URL=${SONAR_HOST_URL}" >> config.properties
+                    echo "DOCKER_IMAGE_TAG=${DOCKER_IMAGE_TAG}" >> config.properties
+                    echo "MLFLOW_EXPERIMENT_NAME=${MLFLOW_EXPERIMENT_NAME}" >> config.properties
+                    echo "MAX_MLFLOW_RUNS_TO_KEEP=${MAX_MLFLOW_RUNS_TO_KEEP}" >> config.properties
+                    
+                    echo "✅ Configuration loaded:"
+                    cat config.properties
+                    
+                    # Verify critical variables
+                    if [ -z "${AWS_REGION}" ] || [ -z "${CLUSTER_NAME}" ] || [ -z "${ECR_REPO_NAME}" ]; then
+                        echo "❌ Critical configuration variables are missing!"
+                        exit 1
+                    fi
+                    
+                    echo "✅ Configuration verification passed"
+                else
+                    echo "❌ Configuration file not found: ${CONFIG_FILE}"
+                    exit 1
+                fi
+                '''
+                
+                script {
+                    // Read the simple properties file
+                    def props = readProperties file: 'config.properties'
+                    
+                    // Set each property in Jenkins environment
+                    props.each { key, value ->
+                        env.setProperty(key, value)
+                        echo "Loaded: ${key} = ${value}"
                     }
+                    
+                    echo "✅ All configuration loaded successfully"
                 }
             }
         }
+
 
         stage('Code Quality & Security') {
             parallel {
