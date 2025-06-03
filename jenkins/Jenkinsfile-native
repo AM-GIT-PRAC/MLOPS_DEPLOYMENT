@@ -1,3 +1,6 @@
+// jenkins/Jenkinsfile-native-simplified
+// This version uses AWS CLI instead of kubeconfig credential
+
 pipeline {
     agent any
     
@@ -28,7 +31,6 @@ pipeline {
                     }
                     
                     echo "✅ Configuration loaded successfully"
-                    sh 'env | grep -E "AWS_|SONAR_|ECR_|K8S_"'
                 }
             }
         }
@@ -46,7 +48,6 @@ pipeline {
                 python3 << EOF
 import mlflow
 import os
-import shutil
 
 mlflow.set_tracking_uri("file:./mlruns")
 
@@ -87,15 +88,13 @@ EOF
         stage('SonarQube Code Scan') {
             steps {
                 withCredentials([string(credentialsId: 'sonarqube-creds', variable: 'SONAR_AUTH_TOKEN')]) {
-                    withSonarQubeEnv('SonarQube Server') {
-                        sh """
-                        sonar-scanner \
-                            -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                            -Dsonar.sources=src \
-                            -Dsonar.host.url=${SONAR_HOST_URL} \
-                            -Dsonar.login=${SONAR_AUTH_TOKEN}
-                        """
-                    }
+                    sh """
+                    sonar-scanner \
+                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                        -Dsonar.sources=src \
+                        -Dsonar.host.url=${SONAR_HOST_URL} \
+                        -Dsonar.login=${SONAR_AUTH_TOKEN}
+                    """
                 }
             }
         }
@@ -103,13 +102,9 @@ EOF
         stage('Train Model') {
             steps {
                 sh '''
-                # Generate fresh data
                 python3 src/generate_data.py
-                
-                # Train new model
                 python3 src/train_model.py
                 
-                # Verify model exists
                 if [ ! -f "models/best_model.pkl" ]; then
                     echo "❌ Model training failed"
                     exit 1
@@ -127,6 +122,10 @@ EOF
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     dir("${env.TERRAFORM_DIR}") {
                         sh '''
+                        export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                        export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                        export AWS_DEFAULT_REGION=${AWS_REGION}
+                        
                         terraform init || exit 1
                         terraform apply -auto-approve || exit 1
                         '''
@@ -166,11 +165,21 @@ EOF
             }
         }
 
-        stage('Deploy to Kubernetes') {
+        stage('Deploy to Kubernetes - No Kubeconfig Required') {
             steps {
-                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
+                withCredentials([usernamePassword(credentialsId: 'aws-creds',
+                    usernameVariable: 'AWS_ACCESS_KEY_ID',
+                    passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     sh '''
-                    # Deploy with production values
+                    # Configure AWS CLI
+                    aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                    aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                    aws configure set default.region ${AWS_REGION}
+                    
+                    echo "🔄 Updating kubeconfig for EKS cluster..."
+                    aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+                    
+                    echo "🚀 Deploying to Kubernetes..."
                     helm upgrade --install fraud-detection k8s/helm \
                         --namespace ${K8S_NAMESPACE} \
                         --create-namespace \
@@ -178,15 +187,15 @@ EOF
                         --set image.repository=${ECR_REPO_URI} \
                         --set image.tag=${DOCKER_IMAGE_TAG}
                     
-                    # Wait for deployment
+                    echo "⏳ Waiting for deployment to be ready..."
                     kubectl wait --for=condition=ready pod -l app=fraud-detection -n ${K8S_NAMESPACE} --timeout=300s
                     
-                    # Get LoadBalancer URL
-                    echo "🌐 Getting API endpoint..."
+                    echo "🌐 Getting LoadBalancer URL..."
                     kubectl get svc fraud-detection -n ${K8S_NAMESPACE} -o wide
                     
                     EXTERNAL_IP=$(kubectl get svc fraud-detection -n ${K8S_NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' || echo "pending")
                     echo "🚀 API accessible at: http://${EXTERNAL_IP}/docs"
+                    echo "🧪 Test endpoint: http://${EXTERNAL_IP}/predict"
                     '''
                 }
             }
@@ -200,6 +209,7 @@ EOF
         }
         success {
             echo '✅ Pipeline completed successfully.'
+            echo '🌐 Your fraud detection API is now live!'
         }
         failure {
             echo '❌ Pipeline failed. Check logs for details.'
