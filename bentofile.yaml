@@ -1,16 +1,84 @@
 service: "src.fraud_service:svc"
+name: "fraud_detector"
+version: "1.0.0"
+
+description: |
+  Fraud Detection ML Service
+  
+  This service provides real-time fraud detection capabilities for financial transactions.
+  It uses machine learning models trained on transaction data to predict the likelihood
+  of fraudulent activity.
+
 labels:
   owner: "ml-team"
   project: "fraud-detection"
+  environment: "production"
+  model_type: "classification"
+
 include:
   - "models/"
   - "src/"
   - "requirements.txt"
+  - "data/feature_mapping.json"
+
+exclude:
+  - "tests/"
+  - "notebooks/"
+  - "*.log"
+  - "__pycache__/"
+  - "*.pyc"
+  - ".git/"
+  - "terraform/"
+  - "k8s/"
+  - "jenkins/"
+
 python:
+  requirements_txt: "requirements.txt"
   packages:
-    - scikit-learn
-    - pandas
-    - joblib
-    - bentoml
-    - mlflow
-    - numpy
+    - "scikit-learn>=1.1.0"
+    - "pandas>=1.5.0"
+    - "joblib>=1.1.0"
+    - "numpy>=1.21.0"
+    - "bentoml>=1.0.0"
+    - "mlflow>=2.0.0"
+    - "fastapi>=0.95.0"
+    - "uvicorn>=0.20.0"
+    - "pydantic>=1.10.0"
+
+docker:
+  distro: "debian"
+  python_version: "3.8"
+  system_packages:
+    - "curl"
+    - "libatlas-base-dev"
+  dockerfile_template: |
+    FROM {{ base_image }} as base-container
+    
+    # Install system dependencies
+    RUN apt-get update && apt-get install -y \
+        {{ system_packages | join(' ') }} \
+        && rm -rf /var/lib/apt/lists/*
+    
+    # Create non-root user
+    RUN adduser --disabled-password --gecos '' bentouser
+    
+    {{ super() }}
+    
+    # Set proper ownership
+    USER root
+    RUN chown -R bentouser:bentouser $BENTOML_HOME
+    
+    # Health check
+    HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+        CMD curl -f http://localhost:3000/healthz || exit 1
+    
+    # Switch to non-root user
+    USER bentouser
+    
+    # Set environment variables
+    ENV PYTHONUNBUFFERED=1
+    ENV MODEL_PATH="$BENTOML_HOME/models/best_model.pkl"
+
+models:
+  - tag: "fraud_detector:latest"
+    filter: "name:fraud_detector"
