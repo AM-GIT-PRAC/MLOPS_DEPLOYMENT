@@ -6,6 +6,9 @@ image:
   tag: latest
   pullPolicy: Always
 
+nameOverride: ""
+fullnameOverride: ""
+
 service:
   type: LoadBalancer  # For external access
   port: 80
@@ -13,7 +16,21 @@ service:
   annotations:
     service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
     service.beta.kubernetes.io/aws-load-balancer-scheme: "internet-facing"
+    service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "http"
 
+# Ingress configuration (optional)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: fraud-detection.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Resource limits and requests
 resources:
   limits:
     cpu: 1000m
@@ -28,8 +45,9 @@ autoscaling:
   minReplicas: 2
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
 
-# Health checks
+# Health checks with proper paths
 livenessProbe:
   httpGet:
     path: /healthz
@@ -37,11 +55,63 @@ livenessProbe:
   initialDelaySeconds: 60
   periodSeconds: 30
   timeoutSeconds: 10
+  failureThreshold: 3
 
 readinessProbe:
   httpGet:
     path: /healthz
     port: 3000
-  initialDelaySeconds: 10
+  initialDelaySeconds: 15
   periodSeconds: 10
   timeoutSeconds: 5
+  failureThreshold: 3
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+# Pod security context
+podSecurityContext:
+  fsGroup: 1000
+
+# Environment variables
+env:
+  - name: MODEL_PATH
+    value: "/app/models/best_model.pkl"
+  - name: LOG_LEVEL
+    value: "INFO"
+  - name: PYTHONUNBUFFERED
+    value: "1"
+
+# Node selection
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity rules
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app
+            operator: In
+            values:
+            - fraud-detection
+        topologyKey: kubernetes.io/hostname
+
+# Service monitor for Prometheus (if using)
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  path: /metrics
