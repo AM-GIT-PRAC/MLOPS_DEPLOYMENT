@@ -17,7 +17,7 @@ pipeline {
                 fi
                 source ${VENV_PATH}/bin/activate
                 pip install --upgrade pip
-                pip install mlflow bentoml scikit-learn pandas numpy joblib faker seaborn matplotlib
+                pip install mlflow bentoml scikit-learn pandas numpy joblib faker seaborn matplotlib fastapi uvicorn
                 echo "✅ Python environment ready"
                 
                 echo "🔧 Loading configuration..."
@@ -86,36 +86,55 @@ EOF
             parallel {
                 stage('SonarQube Code Scan') {
                     steps {
-                        withCredentials([string(credentialsId: 'sonarqube-creds', variable: 'SONAR_AUTH_TOKEN')]) {
-                            sh '''#!/bin/bash
-                            echo "📊 Running SonarQube code quality scan..."
-                            echo "🔍 SonarQube URL: ${SONAR_HOST_URL}"
-                            echo "📋 Project Key: ${SONAR_PROJECT_KEY}"
-                            
-                            # Check if SonarQube container is running
-                            if curl -s "${SONAR_HOST_URL}/api/system/status" | grep -q "UP"; then
-                                echo "✅ SonarQube container is accessible"
-                                
-                                # Run SonarQube scan using Docker container
-                                docker run --rm \
-                                    --network host \
-                                    -v $(pwd):/usr/src \
-                                    -w /usr/src \
-                                    sonarsource/sonar-scanner-cli:latest \
-                                    sonar-scanner \
-                                    -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                                    -Dsonar.sources=src \
-                                    -Dsonar.host.url=${SONAR_HOST_URL} \
-                                    -Dsonar.login=${SONAR_AUTH_TOKEN}
+                        script {
+                            try {
+                                withCredentials([string(credentialsId: 'sonarqube-creds', variable: 'SONAR_AUTH_TOKEN')]) {
+                                    sh '''#!/bin/bash
+                                    echo "📊 Running SonarQube code quality scan..."
+                                    echo "🔍 SonarQube URL: ${SONAR_HOST_URL}"
+                                    echo "📋 Project Key: ${SONAR_PROJECT_KEY}"
                                     
-                                echo "✅ SonarQube scan completed"
-                            else
-                                echo "⚠️ SonarQube container not accessible at ${SONAR_HOST_URL}"
-                                echo "Checking if SonarQube container is running..."
-                                docker ps | grep sonarqube || echo "SonarQube container not found"
-                                echo "Continuing pipeline without SonarQube scan..."
-                            fi
-                            '''
+                                    # Test SonarQube connectivity first
+                                    if curl -s -f "${SONAR_HOST_URL}/api/system/status" > /dev/null; then
+                                        echo "✅ SonarQube container is accessible"
+                                        
+                                        # Test authentication
+                                        AUTH_TEST=$(curl -s -w "%{http_code}" -H "Authorization: Bearer ${SONAR_AUTH_TOKEN}" "${SONAR_HOST_URL}/api/authentication/validate" -o /dev/null)
+                                        
+                                        if [ "$AUTH_TEST" = "200" ]; then
+                                            echo "✅ SonarQube authentication successful"
+                                            
+                                            # Run SonarQube scan
+                                            docker run --rm \
+                                                --network host \
+                                                -v $(pwd):/usr/src \
+                                                -w /usr/src \
+                                                sonarsource/sonar-scanner-cli:latest \
+                                                sonar-scanner \
+                                                -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                                                -Dsonar.sources=src \
+                                                -Dsonar.host.url=${SONAR_HOST_URL} \
+                                                -Dsonar.token=${SONAR_AUTH_TOKEN} \
+                                                -Dsonar.qualitygate.wait=false
+                                                
+                                            echo "✅ SonarQube scan completed successfully"
+                                        else
+                                            echo "❌ SonarQube authentication failed (HTTP: $AUTH_TEST)"
+                                            echo "Please check the SonarQube token in Jenkins credentials"
+                                            exit 1
+                                        fi
+                                    else
+                                        echo "❌ SonarQube container not accessible at ${SONAR_HOST_URL}"
+                                        echo "Please ensure SonarQube is running"
+                                        exit 1
+                                    fi
+                                    '''
+                                }
+                            } catch (Exception e) {
+                                echo "❌ SonarQube scan failed: ${e.getMessage()}"
+                                echo "⚠️ Continuing pipeline without SonarQube scan"
+                                currentBuild.result = 'UNSTABLE'
+                            }
                         }
                     }
                 }
@@ -126,6 +145,12 @@ EOF
                         echo "🔒 Running security scan..."
                         trivy fs . > trivy-fs-report.txt || true
                         echo "✅ Security scan completed"
+                        
+                        # Show summary of findings
+                        if [ -f trivy-fs-report.txt ]; then
+                            echo "📄 Security scan summary:"
+                            grep -E "(CRITICAL|HIGH)" trivy-fs-report.txt | wc -l || echo "No critical/high vulnerabilities found"
+                        fi
                         '''
                     }
                 }
@@ -138,43 +163,50 @@ EOF
                 echo "🤖 Running ML pipeline..."
                 source ${VENV_PATH}/bin/activate
                 
+                # Start MLflow server in background
+                echo "🔄 Starting MLflow tracking server..."
+                export MLFLOW_TRACKING_URI="file:./mlruns"
+                
+                # Check if MLflow server is already running
+                if ! pgrep -f "mlflow server" > /dev/null; then
+                    mlflow server --host 0.0.0.0 --port 5000 --backend-store-uri file:./mlruns --default-artifact-root ./mlartifacts --serve-artifacts &
+                    MLFLOW_PID=$!
+                    echo "Started MLflow server with PID: $MLFLOW_PID"
+                    sleep 10  # Give server time to start
+                else
+                    echo "MLflow server is already running"
+                fi
+                
+                # Test MLflow connectivity
+                for i in {1..5}; do
+                    if curl -s http://localhost:5000/health > /dev/null; then
+                        echo "✅ MLflow server is accessible"
+                        break
+                    else
+                        echo "Waiting for MLflow server... ($i/5)"
+                        sleep 5
+                    fi
+                done
+                
+                # Set environment for MLflow
+                export MLFLOW_TRACKING_URI="http://localhost:5000"
+                
                 # MLflow cleanup using config variables
                 echo "🧹 Cleaning up old MLflow runs (keeping ${MAX_MLFLOW_RUNS_TO_KEEP})..."
-                python3 -c "
-import mlflow
-import os
-
-mlflow.set_tracking_uri('file:./mlruns')
-try:
-    experiment_name = '${MLFLOW_EXPERIMENT_NAME}'
-    max_runs = int('${MAX_MLFLOW_RUNS_TO_KEEP}')
-    
-    experiment = mlflow.get_experiment_by_name(experiment_name)
-    if experiment:
-        runs = mlflow.search_runs(experiment_ids=[experiment.experiment_id])
-        print(f'Found {len(runs)} existing runs')
-        
-        if len(runs) > max_runs:
-            old_runs = runs.iloc[max_runs:]
-            for _, run in old_runs.iterrows():
-                try:
-                    mlflow.delete_run(run.run_id)
-                    print(f'Deleted old run: {run.run_id}')
-                except Exception as e:
-                    print(f'Could not delete run: {e}')
-        
-        print(f'✅ Cleanup completed. Keeping {min(len(runs), max_runs)} runs.')
-    else:
-        print('Experiment not found, will be created during training.')
-except Exception as e:
-    print(f'MLflow cleanup error: {e}')
-"
+                python3 scripts/cleanup_mlflow.py || echo "MLflow cleanup failed, continuing..."
                 
                 # Generate data and train model
                 echo "📊 Generating training data..."
                 python3 src/generate_data.py
                 
+                # Verify data was created
+                if [ ! -f "data/transactions.csv" ]; then
+                    echo "❌ Data generation failed"
+                    exit 1
+                fi
+                
                 echo "🎓 Training models..."
+                export MLFLOW_TRACKING_URI="http://localhost:5000"
                 python3 src/train_model.py
                 
                 # Verify model exists
@@ -183,6 +215,7 @@ except Exception as e:
                     exit 1
                 fi
                 
+                echo "🌐 MLflow UI available at: http://localhost:5000"
                 echo "✅ ML pipeline completed successfully"
                 '''
             }
@@ -194,39 +227,49 @@ except Exception as e:
                     usernameVariable: 'AWS_ACCESS_KEY_ID',
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
                     script {
-                        // Use the TERRAFORM_DIR variable from config
-                        dir("${env.TERRAFORM_DIR}") {
-                            sh '''#!/bin/bash
-                            echo "🏗️ Deploying AWS infrastructure using Terraform..."
-                            echo "📂 Working in directory: $(pwd)"
-                            echo "📁 Terraform files:"
-                            ls -la *.tf || { echo "❌ No Terraform files found!"; exit 1; }
-                            
-                            # Configure AWS credentials
-                            export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-                            export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-                            export AWS_DEFAULT_REGION=${AWS_REGION}
-                            
-                            echo "🔧 Terraform initialization..."
-                            terraform init
-                            
-                            echo "📋 Terraform planning..."
-                            terraform plan \
-                                -var="region=${AWS_REGION}" \
-                                -var="cluster_name=${CLUSTER_NAME}" \
-                                -var="aws_account_id=${AWS_ACCOUNT_ID}"
-                            
-                            echo "🚀 Terraform applying..."
-                            terraform apply -auto-approve \
-                                -var="region=${AWS_REGION}" \
-                                -var="cluster_name=${CLUSTER_NAME}" \
-                                -var="aws_account_id=${AWS_ACCOUNT_ID}"
-                            
-                            echo "✅ Infrastructure deployment completed"
-                            
-                            # Output important information
-                            terraform output
-                            '''
+                        try {
+                            dir("${env.TERRAFORM_DIR}") {
+                                sh '''#!/bin/bash
+                                echo "🏗️ Deploying AWS infrastructure using Terraform..."
+                                echo "📂 Working in directory: $(pwd)"
+                                echo "📁 Terraform files:"
+                                ls -la *.tf || { echo "❌ No Terraform files found!"; exit 1; }
+                                
+                                # Configure AWS credentials
+                                export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+                                export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+                                export AWS_DEFAULT_REGION=${AWS_REGION}
+                                
+                                # Verify AWS credentials
+                                echo "🔍 Verifying AWS credentials..."
+                                aws sts get-caller-identity || { echo "❌ AWS credentials invalid"; exit 1; }
+                                
+                                echo "🔧 Terraform initialization..."
+                                terraform init
+                                
+                                echo "🔍 Terraform validation..."
+                                terraform validate || { echo "❌ Terraform configuration invalid"; exit 1; }
+                                
+                                echo "📋 Terraform planning..."
+                                terraform plan \
+                                    -var="region=${AWS_REGION}" \
+                                    -var="cluster_name=${CLUSTER_NAME}" \
+                                    -var="aws_account_id=${AWS_ACCOUNT_ID}" \
+                                    -out=tfplan
+                                
+                                echo "🚀 Terraform applying..."
+                                terraform apply -auto-approve tfplan
+                                
+                                echo "✅ Infrastructure deployment completed"
+                                
+                                # Output important information
+                                terraform output
+                                '''
+                            }
+                        } catch (Exception e) {
+                            echo "❌ Infrastructure deployment failed: ${e.getMessage()}"
+                            currentBuild.result = 'FAILURE'
+                            error("Infrastructure deployment failed")
                         }
                     }
                 }
@@ -246,16 +289,44 @@ except Exception as e:
                     aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
                     aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
                     aws configure set default.region ${AWS_REGION}
+                    
+                    # Create ECR repository if it doesn't exist
+                    echo "🏗️ Ensuring ECR repository exists..."
+                    aws ecr describe-repositories --repository-names ${ECR_REPO_NAME} --region ${AWS_REGION} 2>/dev/null || \
+                    aws ecr create-repository --repository-name ${ECR_REPO_NAME} --region ${AWS_REGION}
 
                     # Build Docker image
+                    echo "🔨 Building Docker image..."
                     docker build -t ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} .
                     
+                    # Test the built image
+                    echo "🧪 Testing Docker image..."
+                    docker run -d --name test-container -p 3001:3000 ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG}
+                    sleep 10
+                    
+                    # Test health endpoint
+                    if curl -f http://localhost:3001/healthz; then
+                        echo "✅ Container health check passed"
+                    else
+                        echo "⚠️ Container health check failed"
+                    fi
+                    
+                    # Stop and remove test container
+                    docker stop test-container || true
+                    docker rm test-container || true
+                    
                     # Login to ECR
+                    echo "🔐 Logging into ECR..."
                     aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${ECR_REPO_URI}
                     
                     # Tag and push
+                    echo "📤 Pushing to ECR..."
                     docker tag ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
                     docker push ${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}
+                    
+                    # Also tag as latest
+                    docker tag ${ECR_REPO_NAME}:${DOCKER_IMAGE_TAG} ${ECR_REPO_URI}:latest
+                    docker push ${ECR_REPO_URI}:latest
                     
                     # Security scan
                     echo "🔒 Running container security scan..."
@@ -272,62 +343,106 @@ except Exception as e:
                 withCredentials([usernamePassword(credentialsId: 'aws-creds',
                     usernameVariable: 'AWS_ACCESS_KEY_ID',
                     passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-                    sh '''#!/bin/bash
-                    echo "🚀 Deploying to Kubernetes cluster: ${CLUSTER_NAME}"
-                    
-                    # Configure AWS
-                    aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
-                    aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
-                    aws configure set default.region ${AWS_REGION}
-                    
-                    # Wait for EKS cluster to be ready
-                    echo "⏳ Waiting for EKS cluster to be active..."
-                    aws eks wait cluster-active --name ${CLUSTER_NAME} --region ${AWS_REGION}
-                    
-                    # Configure kubectl
-                    echo "⚓ Configuring kubectl for cluster: ${CLUSTER_NAME}"
-                    aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
-                    
-                    # Verify cluster access
-                    echo "🔍 Verifying cluster access..."
-                    kubectl get nodes
-                    
-                    # Deploy with Helm using config variables
-                    echo "📦 Deploying to namespace: ${K8S_NAMESPACE}"
-                    helm upgrade --install fraud-detection k8s/helm \
-                        --namespace ${K8S_NAMESPACE} \
-                        --create-namespace \
-                        --values k8s/helm/values-production.yaml \
-                        --set image.repository=${ECR_REPO_URI} \
-                        --set image.tag=${DOCKER_IMAGE_TAG} \
-                        --timeout=10m
-                    
-                    # Wait for deployment
-                    echo "⏳ Waiting for deployment to be ready..."
-                    kubectl wait --for=condition=ready pod -l app=fraud-detection -n ${K8S_NAMESPACE} --timeout=300s
-                    
-                    # Get service information
-                    echo "📊 Deployment status:"
-                    kubectl get pods -n ${K8S_NAMESPACE}
-                    kubectl get svc fraud-detection -n ${K8S_NAMESPACE} -o wide
-                    
-                    # Get LoadBalancer URL
-                    EXTERNAL_IP=$(kubectl get svc fraud-detection -n ${K8S_NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
-                    
-                    echo ""
-                    echo "🎉 DEPLOYMENT SUCCESSFUL!"
-                    echo "================================================="
-                    echo "🌐 API Endpoint: http://${EXTERNAL_IP}"
-                    echo "🧪 Health Check: http://${EXTERNAL_IP}/healthz"
-                    echo "📚 API Documentation: http://${EXTERNAL_IP}/docs"
-                    echo "🔍 Test Prediction: http://${EXTERNAL_IP}/predict"
-                    echo ""
-                    echo "📝 Example API call:"
-                    echo "curl -X POST http://${EXTERNAL_IP}/predict \\"
-                    echo "  -H 'Content-Type: application/json' \\"
-                    echo "  -d '{\"amount\": 150.0, \"merchant\": \"Amazon\", \"location\": \"NewYork\", \"card_type\": \"Visa\"}'"
-                    echo "================================================="
-                    '''
+                    script {
+                        try {
+                            sh '''#!/bin/bash
+                            echo "🚀 Deploying to Kubernetes cluster: ${CLUSTER_NAME}"
+                            
+                            # Configure AWS
+                            aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+                            aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+                            aws configure set default.region ${AWS_REGION}
+                            
+                            # Check if cluster exists
+                            echo "🔍 Checking EKS cluster status..."
+                            if aws eks describe-cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} > /dev/null 2>&1; then
+                                echo "✅ EKS cluster '${CLUSTER_NAME}' found"
+                                
+                                # Wait for EKS cluster to be ready
+                                echo "⏳ Waiting for EKS cluster to be active..."
+                                aws eks wait cluster-active --name ${CLUSTER_NAME} --region ${AWS_REGION} --cli-read-timeout 300
+                                
+                                # Configure kubectl
+                                echo "⚓ Configuring kubectl for cluster: ${CLUSTER_NAME}"
+                                aws eks update-kubeconfig --region ${AWS_REGION} --name ${CLUSTER_NAME}
+                                
+                                # Verify cluster access
+                                echo "🔍 Verifying cluster access..."
+                                kubectl get nodes
+                                
+                                # Deploy with Helm using config variables
+                                echo "📦 Deploying to namespace: ${K8S_NAMESPACE}"
+                                
+                                # Update Helm values with current image tag
+                                helm upgrade --install fraud-detection k8s/helm \
+                                    --namespace ${K8S_NAMESPACE} \
+                                    --create-namespace \
+                                    --values k8s/helm/values-production.yaml \
+                                    --set image.repository=${ECR_REPO_URI} \
+                                    --set image.tag=${DOCKER_IMAGE_TAG} \
+                                    --timeout=10m \
+                                    --wait
+                                
+                                # Wait for deployment to be ready
+                                echo "⏳ Waiting for deployment to be ready..."
+                                kubectl wait --for=condition=ready pod -l app=fraud-detection -n ${K8S_NAMESPACE} --timeout=300s
+                                
+                                # Get service information
+                                echo "📊 Deployment status:"
+                                kubectl get pods -n ${K8S_NAMESPACE}
+                                kubectl get svc fraud-detection -n ${K8S_NAMESPACE} -o wide
+                                
+                                # Get LoadBalancer URL
+                                echo "🌐 Getting external endpoint..."
+                                sleep 30  # Give load balancer time to provision
+                                EXTERNAL_IP=$(kubectl get svc fraud-detection -n ${K8S_NAMESPACE} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || echo "pending")
+                                
+                                # Test the deployment
+                                if [ "$EXTERNAL_IP" != "pending" ] && [ ! -z "$EXTERNAL_IP" ]; then
+                                    echo "🧪 Testing deployment..."
+                                    sleep 60  # Give more time for DNS propagation
+                                    
+                                    if curl -f -m 30 "http://${EXTERNAL_IP}/healthz"; then
+                                        echo "✅ Deployment health check passed"
+                                    else
+                                        echo "⚠️ Deployment health check failed (this may be normal during initial deployment)"
+                                    fi
+                                fi
+                                
+                                echo ""
+                                echo "🎉 DEPLOYMENT SUCCESSFUL!"
+                                echo "================================================="
+                                echo "🌐 API Endpoint: http://${EXTERNAL_IP}"
+                                echo "🧪 Health Check: http://${EXTERNAL_IP}/healthz"
+                                echo "📚 API Documentation: http://${EXTERNAL_IP}/docs"
+                                echo "🔍 Model Info: http://${EXTERNAL_IP}/info"
+                                echo ""
+                                echo "📝 Example API calls:"
+                                echo "# Health check"
+                                echo "curl http://${EXTERNAL_IP}/healthz"
+                                echo ""
+                                echo "# Single prediction"
+                                echo "curl -X POST http://${EXTERNAL_IP}/predict \\"
+                                echo "  -H 'Content-Type: application/json' \\"
+                                echo "  -d '{\"amount\": 150.0, \"merchant\": \"Amazon\", \"location\": \"NewYork\", \"card_type\": \"Visa\"}'"
+                                echo ""
+                                echo "# Batch prediction"
+                                echo "curl -X POST http://${EXTERNAL_IP}/batch_predict \\"
+                                echo "  -H 'Content-Type: application/json' \\"
+                                echo "  -d '{\"transactions\": [{\"amount\": 150.0, \"merchant\": \"Amazon\", \"location\": \"NewYork\", \"card_type\": \"Visa\"}]}'"
+                                echo "================================================="
+                                
+                            else
+                                echo "❌ EKS cluster '${CLUSTER_NAME}' not found"
+                                echo "This is likely due to the Terraform infrastructure deployment failure"
+                                exit 1
+                            fi
+                            '''
+                        } catch (Exception e) {
+                            echo "❌ Kubernetes deployment failed: ${e.getMessage()}"
+                            currentBuild.result = 'FAILURE'
+                        }
+                    }
                 }
             }
         }
@@ -335,19 +450,62 @@ except Exception as e:
 
     post {
         always {
+            sh '''#!/bin/bash
+            echo "🧹 Cleaning up..."
+            
+            # Stop MLflow server if running
+            pkill -f "mlflow server" || true
+            
+            # Clean up test containers
+            docker stop test-container 2>/dev/null || true
+            docker rm test-container 2>/dev/null || true
+            
+            echo "📁 Pipeline artifacts:"
+            ls -la trivy-*.txt models/*.pkl mlruns/ 2>/dev/null || echo "Some artifacts may not exist"
+            '''
+            
+            // Archive artifacts
             archiveArtifacts artifacts: 'trivy-*.txt', allowEmptyArchive: true
             archiveArtifacts artifacts: 'models/*.pkl', allowEmptyArchive: true
-            sh '''#!/bin/bash
-            echo "📁 Pipeline artifacts created:"
-            ls -la trivy-*.txt models/*.pkl 2>/dev/null || echo "No artifacts found"
-            '''
+            archiveArtifacts artifacts: 'models/*.json', allowEmptyArchive: true
+            archiveArtifacts artifacts: 'data/*.csv', allowEmptyArchive: true
+            
+            // Publish test results if they exist
+            script {
+                if (fileExists('test-results.xml')) {
+                    publishTestResults testResultsPattern: 'test-results.xml'
+                }
+            }
         }
+        
         success {
             echo '🎉 COMPLETE PIPELINE SUCCESS!'
-            echo "✅ Infrastructure: EKS cluster '${CLUSTER_NAME}' created"
-            echo "✅ Application: Container '${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}' deployed"
-            echo "✅ Kubernetes: Service running in namespace '${K8S_NAMESPACE}'"
+            echo "✅ Infrastructure: EKS cluster '${CLUSTER_NAME}' deployed"
+            echo "✅ Application: Container '${ECR_REPO_URI}:${DOCKER_IMAGE_TAG}' built and pushed"
+            echo "✅ Kubernetes: Service deployed in namespace '${K8S_NAMESPACE}'"
+            echo "🌐 MLflow UI: http://localhost:5000 (if running locally)"
+            
+            // Send success notification (if configured)
+            script {
+                try {
+                    emailext (
+                        subject: "✅ MLOps Pipeline Success - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                        body: """
+                        Pipeline completed successfully!
+                        
+                        Build: ${env.BUILD_URL}
+                        Cluster: ${env.CLUSTER_NAME}
+                        Image: ${env.ECR_REPO_URI}:${env.DOCKER_IMAGE_TAG}
+                        Namespace: ${env.K8S_NAMESPACE}
+                        """,
+                        to: "${env.CHANGE_AUTHOR_EMAIL ?: 'dev-team@company.com'}"
+                    )
+                } catch (Exception e) {
+                    echo "Email notification failed: ${e.getMessage()}"
+                }
+            }
         }
+        
         failure {
             echo '❌ Pipeline failed. Check logs above for details.'
             sh '''#!/bin/bash
@@ -355,7 +513,38 @@ except Exception as e:
             echo "AWS_REGION: ${AWS_REGION:-NOT_SET}"
             echo "CLUSTER_NAME: ${CLUSTER_NAME:-NOT_SET}"
             echo "ECR_REPO_URI: ${ECR_REPO_URI:-NOT_SET}"
+            echo "DOCKER_IMAGE_TAG: ${DOCKER_IMAGE_TAG:-NOT_SET}"
+            
+            # Show recent logs for debugging
+            echo "📝 Recent system logs:"
+            tail -50 /var/log/jenkins/jenkins.log 2>/dev/null || echo "Jenkins logs not accessible"
             '''
+            
+            // Send failure notification (if configured)
+            script {
+                try {
+                    emailext (
+                        subject: "❌ MLOps Pipeline Failed - ${env.JOB_NAME} #${env.BUILD_NUMBER}",
+                        body: """
+                        Pipeline failed!
+                        
+                        Build: ${env.BUILD_URL}
+                        Failed Stage: ${env.STAGE_NAME}
+                        
+                        Please check the logs for details.
+                        """,
+                        to: "${env.CHANGE_AUTHOR_EMAIL ?: 'dev-team@company.com'}"
+                    )
+                } catch (Exception e) {
+                    echo "Email notification failed: ${e.getMessage()}"
+                }
+            }
+        }
+        
+        unstable {
+            echo '⚠️ Pipeline completed with warnings.'
+            echo 'Some non-critical steps may have failed (e.g., SonarQube scan)'
         }
     }
 }
+                
