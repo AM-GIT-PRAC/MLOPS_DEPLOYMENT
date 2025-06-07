@@ -1,4 +1,6 @@
-# General Configuration
+# terraform/variables.tf
+# Variable definitions only - no default values
+
 variable "region" {
   type        = string
   description = "AWS region"
@@ -9,7 +11,6 @@ variable "aws_account_id" {
   description = "Your AWS account ID"
 }
 
-# VPC Configuration
 variable "vpc_name" {
   type        = string
   description = "Name of the VPC"
@@ -30,7 +31,11 @@ variable "public_subnets" {
   description = "List of public subnet CIDRs"
 }
 
-# EKS Configuration
+variable "private_subnets" {
+  type        = list(string)
+  description = "List of private subnet CIDRs"
+}
+
 variable "cluster_name" {
   type        = string
   description = "Name of the EKS cluster"
@@ -61,7 +66,11 @@ variable "max_size" {
   description = "Maximum number of nodes"
 }
 
-# ECR Configuration
+variable "key_name" {
+  type        = string
+  description = "EC2 Key Pair name for SSH access (optional)"
+}
+
 variable "ecr_repo_name" {
   type        = string
   description = "Name of the ECR repository"
