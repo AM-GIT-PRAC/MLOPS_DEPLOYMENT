@@ -1,0 +1,60 @@
+{
+  "feature_columns": [
+    "amount",
+    "merchant_Amazon",
+    "merchant_Walmart",
+    "merchant_eBay",
+    "merchant_Target",
+    "merchant_BestBuy",
+    "location_NewYork",
+    "location_LosAngeles",
+    "location_Chicago",
+    "location_Houston",
+    "location_Phoenix",
+    "location_Philadelphia",
+    "location_SanAntonio",
+    "location_SanDiego",
+    "location_Dallas",
+    "location_SanJose",
+    "location_Austin",
+    "location_Jacksonville",
+    "location_SanFrancisco",
+    "location_Columbus",
+    "location_Charlotte",
+    "card_type_Visa",
+    "card_type_MasterCard",
+    "card_type_Amex"
+  ],
+  "categorical_mappings": {
+    "merchant": [
+      "Amazon",
+      "Walmart",
+      "eBay",
+      "Target",
+      "BestBuy"
+    ],
+    "location": [
+      "NewYork",
+      "LosAngeles",
+      "Chicago",
+      "Houston",
+      "Phoenix",
+      "Philadelphia",
+      "SanAntonio",
+      "SanDiego",
+      "Dallas",
+      "SanJose",
+      "Austin",
+      "Jacksonville",
+      "SanFrancisco",
+      "Columbus",
+      "Charlotte"
+    ],
+    "card_type": [
+      "Visa",
+      "MasterCard",
+      "Amex"
+    ]
+  },
+  "total_features": 24
+}

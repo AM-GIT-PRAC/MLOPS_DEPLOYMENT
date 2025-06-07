@@ -1,0 +1,87 @@
+{
+  "dataset_info": {
+    "total_transactions": 5000,
+    "fraud_transactions": 1467,
+    "legitimate_transactions": 3533,
+    "fraud_rate": 0.2934,
+    "avg_fraud_amount": 1581.065139740968,
+    "avg_legitimate_amount": 397.58364562694595,
+    "generation_date": "2025-06-06T21:41:32.348674",
+    "seed_used": 42
+  },
+  "features": {
+    "merchants": [
+      "Amazon",
+      "Walmart",
+      "eBay",
+      "Target",
+      "BestBuy"
+    ],
+    "locations": [
+      "NewYork",
+      "LosAngeles",
+      "Chicago",
+      "Houston",
+      "Phoenix",
+      "Philadelphia",
+      "SanAntonio",
+      "SanDiego",
+      "Dallas",
+      "SanJose",
+      "Austin",
+      "Jacksonville",
+      "SanFrancisco",
+      "Columbus",
+      "Charlotte"
+    ],
+    "card_types": [
+      "Visa",
+      "MasterCard",
+      "Amex"
+    ],
+    "numerical_features": [
+      "amount"
+    ],
+    "categorical_features": [
+      "merchant",
+      "location",
+      "card_type"
+    ]
+  },
+  "statistics": {
+    "amount_stats": {
+      "count": 5000.0,
+      "mean": 744.817116,
+      "std": 724.052720791725,
+      "min": 5.07,
+      "25%": 271.475,
+      "50%": 515.2850000000001,
+      "75%": 777.1325,
+      "max": 2998.4
+    },
+    "merchant_distribution": {
+      "Amazon": 1277,
+      "Walmart": 998,
+      "eBay": 988,
+      "Target": 874,
+      "BestBuy": 863
+    },
+    "card_type_distribution": {
+      "Visa": 1926,
+      "MasterCard": 1605,
+      "Amex": 1469
+    },
+    "fraud_by_merchant": {
+      "Amazon": 0.4596711041503524,
+      "BestBuy": 0.1853997682502897,
+      "Target": 0.16247139588100687,
+      "Walmart": 0.2925851703406814,
+      "eBay": 0.2894736842105263
+    },
+    "fraud_by_card_type": {
+      "Amex": 0.1906058543226685,
+      "MasterCard": 0.2772585669781931,
+      "Visa": 0.3852544132917965
+    }
+  }
+}
