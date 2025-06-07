@@ -1,35 +1,22 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "fraud-detection.fullname" . }}
+  name: fraud-detection
   labels:
-    {{- include "fraud-detection.labels" . | nindent 4 }}
+    app: fraud-detection
 spec:
-  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
-  {{- end }}
   selector:
     matchLabels:
-      {{- include "fraud-detection.selectorLabels" . | nindent 6 }}
+      app: fraud-detection
   template:
     metadata:
-      annotations:
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
       labels:
-        {{- include "fraud-detection.selectorLabels" . | nindent 8 }}
         app: fraud-detection
         version: {{ .Values.image.tag }}
     spec:
-      {{- with .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: {{ .Chart.Name }}
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+        - name: fraud-detection
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
@@ -37,9 +24,6 @@ spec:
               containerPort: {{ .Values.service.targetPort }}
               protocol: TCP
           env:
-            {{- if .Values.env }}
-            {{- toYaml .Values.env | nindent 12 }}
-            {{- end }}
             - name: MODEL_NAME
               value: "fraud_detector"
             - name: LOG_LEVEL
@@ -58,44 +42,21 @@ spec:
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           {{- end }}
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-            - name: models
-              mountPath: /app/models
-              readOnly: true
-      volumes:
-        - name: tmp
-          emptyDir: {}
-        - name: models
-          emptyDir: {}
       restartPolicy: Always
-      {{- with .Values.nodeSelector }}
-      nodeSelector:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.affinity }}
-      affinity:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
-      {{- with .Values.tolerations }}
-      tolerations:
-        {{- toYaml . | nindent 8 }}
-      {{- end }}
 
 ---
 {{- if .Values.autoscaling.enabled }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "fraud-detection.fullname" . }}
+  name: fraud-detection
   labels:
-    {{- include "fraud-detection.labels" . | nindent 4 }}
+    app: fraud-detection
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "fraud-detection.fullname" . }}
+    name: fraud-detection
   minReplicas: {{ .Values.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.autoscaling.maxReplicas }}
   metrics:
@@ -115,24 +76,4 @@ spec:
           type: Utilization
           averageUtilization: {{ .Values.autoscaling.targetMemoryUtilizationPercentage }}
     {{- end }}
-{{- end }}
-
----
-{{- if .Values.podDisruptionBudget.enabled }}
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: {{ include "fraud-detection.fullname" . }}
-  labels:
-    {{- include "fraud-detection.labels" . | nindent 4 }}
-spec:
-  {{- if .Values.podDisruptionBudget.minAvailable }}
-  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
-  {{- end }}
-  {{- if .Values.podDisruptionBudget.maxUnavailable }}
-  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
-  {{- end }}
-  selector:
-    matchLabels:
-      {{- include "fraud-detection.selectorLabels" . | nindent 6 }}
 {{- end }}
