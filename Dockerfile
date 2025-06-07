@@ -38,11 +38,11 @@ COPY bentofile.yaml .
 RUN echo '#!/bin/bash\ncurl -f http://localhost:3000/healthz || exit 1' > /health_check.sh && \
     chmod +x /health_check.sh
 
-# Ensure model exists - create dummy if missing
+# FIXED: Proper Python script syntax
 RUN if [ ! -f "models/best_model.pkl" ]; then \
         echo "Warning: best_model.pkl not found, creating dummy model..."; \
         mkdir -p models && \
-        python3 -c "
+        python3 << 'EOF'
 import joblib
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
@@ -64,11 +64,11 @@ model.fit(X, y)
 # Save the model
 joblib.dump(model, 'models/best_model.pkl')
 print('Created dummy model with features:', features)
-        "; \
+EOF
     fi
 
 # Create metadata file
-RUN python3 -c "
+RUN python3 << 'EOF'
 import json
 import os
 metadata = {
@@ -79,7 +79,7 @@ metadata = {
 }
 with open('models/metadata.json', 'w') as f:
     json.dump(metadata, f, indent=2)
-"
+EOF
 
 # Set permissions
 RUN chown -R appuser:appuser /app
