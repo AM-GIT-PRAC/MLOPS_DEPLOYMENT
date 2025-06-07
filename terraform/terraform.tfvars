@@ -22,6 +22,6 @@ instance_type   = "t3.small"
 desired_size    = 1
 min_size        = 1
 max_size        = 2
-
+key_name        = ""     
 # ECR Configuration
 ecr_repo_name = "fraud-detection"
