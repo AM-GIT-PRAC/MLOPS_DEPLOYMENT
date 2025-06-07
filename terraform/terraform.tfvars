@@ -15,9 +15,9 @@ cluster_name = "fraud-detection-cluster"
 # Node Group Configuration
 node_group_name = "eks-node-group"
 instance_type   = "t3.medium"
-desired_size    = 2
+desired_size    = 1
 min_size        = 1
-max_size        = 4
+max_size        = 1
 
 # EC2 Key Pair (optional - leave empty if not needed)
 key_name = ""
