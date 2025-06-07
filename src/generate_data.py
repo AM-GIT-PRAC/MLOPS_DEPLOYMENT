@@ -1,3 +1,6 @@
+# src/generate_data.py
+# Static data generation - run once and commit to GitHub
+
 import os
 import pandas as pd
 import random
@@ -10,29 +13,22 @@ fake = Faker()
 # Define consistent categorical values
 MERCHANTS = ['Amazon', 'Walmart', 'eBay', 'Target', 'BestBuy']
 CARD_TYPES = ['Visa', 'MasterCard', 'Amex']
-
-# Generate a diverse set of locations
 LOCATIONS = [
     'NewYork', 'LosAngeles', 'Chicago', 'Houston', 'Phoenix',
     'Philadelphia', 'SanAntonio', 'SanDiego', 'Dallas', 'SanJose',
-    'Austin', 'Jacksonville', 'SanFrancisco', 'Columbus', 'Charlotte',
-    'Indianapolis', 'Seattle', 'Denver', 'Boston', 'Nashville'
+    'Austin', 'Jacksonville', 'SanFrancisco', 'Columbus', 'Charlotte'
 ]
 
-def generate_transaction_data(num_samples=1000, fraud_ratio=0.3, seed=42):
+def generate_static_dataset(num_samples=5000, fraud_ratio=0.3, seed=42):
     """
-    Generate synthetic transaction data with realistic patterns
-    
-    Args:
-        num_samples: Number of transactions to generate
-        fraud_ratio: Proportion of fraudulent transactions
-        seed: Random seed for reproducibility
+    Generate static dataset that will be committed to GitHub
+    Larger dataset for better training
     """
     random.seed(seed)
     np.random.seed(seed)
     fake.seed_instance(seed)
     
-    print(f"🎲 Generating {num_samples} transactions with {fraud_ratio:.1%} fraud rate...")
+    print(f"🎲 Generating static dataset: {num_samples} transactions with {fraud_ratio:.1%} fraud rate...")
     
     data = []
     
@@ -42,23 +38,23 @@ def generate_transaction_data(num_samples=1000, fraud_ratio=0.3, seed=42):
         
         # Generate features with realistic patterns
         if is_fraud:
-            # Fraudulent transactions tend to have higher amounts and specific patterns
-            amount = round(random.uniform(100.0, 2000.0), 2)
-            merchant = random.choices(MERCHANTS, weights=[0.4, 0.2, 0.2, 0.1, 0.1])[0]  # Bias toward Amazon
+            # Fraudulent transactions - higher amounts, specific patterns
+            amount = round(random.uniform(200.0, 3000.0), 2)
+            merchant = random.choices(MERCHANTS, weights=[0.4, 0.2, 0.2, 0.1, 0.1])[0]
             location = random.choice(LOCATIONS)
-            card_type = random.choices(CARD_TYPES, weights=[0.5, 0.3, 0.2])[0]  # Bias toward Visa
+            card_type = random.choices(CARD_TYPES, weights=[0.5, 0.3, 0.2])[0]
         else:
-            # Legitimate transactions have more normal patterns
-            amount = round(random.uniform(1.0, 500.0), 2)
+            # Legitimate transactions - normal patterns
+            amount = round(random.uniform(5.0, 800.0), 2)
             merchant = random.choice(MERCHANTS)
             location = random.choice(LOCATIONS)
             card_type = random.choice(CARD_TYPES)
         
-        # Add some noise and edge cases
-        if random.random() < 0.05:  # 5% chance of unusual amounts
-            amount = round(random.uniform(0.01, 50.0), 2)
+        # Add transaction ID for tracking
+        transaction_id = f"TXN_{i+1:06d}"
         
         data.append({
+            'transaction_id': transaction_id,
             'amount': amount,
             'merchant': merchant,
             'location': location,
@@ -69,10 +65,10 @@ def generate_transaction_data(num_samples=1000, fraud_ratio=0.3, seed=42):
     # Create DataFrame
     df = pd.DataFrame(data)
     
-    # Create folders if they don't exist
+    # Create data directory
     os.makedirs('data', exist_ok=True)
     
-    # Save data
+    # Save main dataset
     output_file = 'data/transactions.csv'
     df.to_csv(output_file, index=False)
     
@@ -82,7 +78,7 @@ def generate_transaction_data(num_samples=1000, fraud_ratio=0.3, seed=42):
     avg_fraud_amount = df[df['is_fraud'] == 1]['amount'].mean()
     avg_legitimate_amount = df[df['is_fraud'] == 0]['amount'].mean()
     
-    # Create metadata
+    # Create comprehensive metadata
     metadata = {
         'dataset_info': {
             'total_transactions': len(df),
@@ -90,17 +86,23 @@ def generate_transaction_data(num_samples=1000, fraud_ratio=0.3, seed=42):
             'legitimate_transactions': int(legitimate_count),
             'fraud_rate': float(fraud_count / len(df)),
             'avg_fraud_amount': float(avg_fraud_amount),
-            'avg_legitimate_amount': float(avg_legitimate_amount)
+            'avg_legitimate_amount': float(avg_legitimate_amount),
+            'generation_date': pd.Timestamp.now().isoformat(),
+            'seed_used': seed
         },
         'features': {
             'merchants': MERCHANTS,
             'locations': LOCATIONS,
-            'card_types': CARD_TYPES
+            'card_types': CARD_TYPES,
+            'numerical_features': ['amount'],
+            'categorical_features': ['merchant', 'location', 'card_type']
         },
-        'generation_params': {
-            'num_samples': num_samples,
-            'fraud_ratio': fraud_ratio,
-            'seed': seed
+        'statistics': {
+            'amount_stats': df['amount'].describe().to_dict(),
+            'merchant_distribution': df['merchant'].value_counts().to_dict(),
+            'card_type_distribution': df['card_type'].value_counts().to_dict(),
+            'fraud_by_merchant': df.groupby('merchant')['is_fraud'].mean().to_dict(),
+            'fraud_by_card_type': df.groupby('card_type')['is_fraud'].mean().to_dict()
         }
     }
     
@@ -108,70 +110,58 @@ def generate_transaction_data(num_samples=1000, fraud_ratio=0.3, seed=42):
     with open('data/dataset_metadata.json', 'w') as f:
         json.dump(metadata, f, indent=2)
     
-    print(f"✅ Dataset created at {output_file}")
+    # Create feature mapping for consistent encoding
+    feature_columns = ['amount']  # Numerical feature
+    
+    for merchant in MERCHANTS:
+        feature_columns.append(f'merchant_{merchant}')
+    
+    for location in LOCATIONS:
+        feature_columns.append(f'location_{location}')
+    
+    for card_type in CARD_TYPES:
+        feature_columns.append(f'card_type_{card_type}')
+    
+    feature_mapping = {
+        'feature_columns': feature_columns,
+        'categorical_mappings': {
+            'merchant': MERCHANTS,
+            'location': LOCATIONS,
+            'card_type': CARD_TYPES
+        },
+        'total_features': len(feature_columns)
+    }
+    
+    with open('data/feature_mapping.json', 'w') as f:
+        json.dump(feature_mapping, f, indent=2)
+    
+    print(f"✅ Static dataset created at {output_file}")
     print(f"📊 Dataset summary:")
     print(f"   Total transactions: {len(df):,}")
     print(f"   Fraudulent: {fraud_count:,} ({fraud_count/len(df):.1%})")
     print(f"   Legitimate: {legitimate_count:,} ({legitimate_count/len(df):.1%})")
     print(f"   Average fraud amount: ${avg_fraud_amount:.2f}")
     print(f"   Average legitimate amount: ${avg_legitimate_amount:.2f}")
-    print(f"📋 Features: {list(df.columns)}")
-    print(f"🏷️ Categorical values:")
-    print(f"   Merchants: {MERCHANTS}")
-    print(f"   Card types: {CARD_TYPES}")
-    print(f"   Locations: {len(LOCATIONS)} unique locations")
+    print(f"   Total features after encoding: {len(feature_columns)}")
     
-    return df
-
-def create_feature_mapping():
-    """Create a mapping of categorical features for consistent encoding"""
-    
-    # Generate all possible one-hot encoded column names
-    feature_columns = ['amount']  # Numerical feature
-    
-    # Add merchant features
-    for merchant in MERCHANTS:
-        feature_columns.append(f'merchant_{merchant}')
-    
-    # Add location features
-    for location in LOCATIONS:
-        feature_columns.append(f'location_{location}')
-    
-    # Add card type features
-    for card_type in CARD_TYPES:
-        feature_columns.append(f'card_type_{card_type}')
-    
-    # Save feature mapping
-    mapping = {
-        'feature_columns': feature_columns,
-        'categorical_mappings': {
-            'merchant': MERCHANTS,
-            'location': LOCATIONS,
-            'card_type': CARD_TYPES
-        }
-    }
-    
-    with open('data/feature_mapping.json', 'w') as f:
-        json.dump(mapping, f, indent=2)
-    
-    print(f"✅ Feature mapping saved with {len(feature_columns)} total features")
-    return feature_columns
-
-if __name__ == '__main__':
-    # Generate dataset
-    df = generate_transaction_data()
-    
-    # Create feature mapping
-    feature_columns = create_feature_mapping()
-    
-    # Show sample data
     print(f"\n📋 Sample data:")
     print(df.head())
     
-    print(f"\n📈 Data types:")
-    print(df.dtypes)
+    print(f"\n📈 Fraud distribution by merchant:")
+    print(df.groupby('merchant')['is_fraud'].agg(['count', 'mean']))
     
-    print(f"\n📊 Value counts for categorical features:")
-    for col in ['merchant', 'location', 'card_type']:
-        print(f"\n{col}:")
-        print(df[col].value_counts().head())
+    return df
+
+if __name__ == '__main__':
+    # Generate static dataset
+    print("🎯 Generating static dataset for MLOps pipeline...")
+    df = generate_static_dataset(num_samples=5000, fraud_ratio=0.3)
+    
+    print("\n" + "="*50)
+    print("📝 IMPORTANT: Commit this data to GitHub!")
+    print("="*50)
+    print("Run these commands:")
+    print("git add data/")
+    print("git commit -m 'Add static training dataset'")
+    print("git push origin MLOPS_Change_2")
+    print("="*50)
