@@ -1,5 +1,5 @@
 # Production values for fraud-detection
-replicaCount: 2
+replicaCount: 1
 
 image:
   repository: 354918408969.dkr.ecr.us-east-2.amazonaws.com/fraud-detection
@@ -42,8 +42,8 @@ resources:
 # Auto-scaling
 autoscaling:
   enabled: true
-  minReplicas: 2
-  maxReplicas: 10
+  minReplicas: 1
+  maxReplicas: 1
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
 
