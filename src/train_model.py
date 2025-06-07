@@ -1,41 +1,32 @@
+# src/train_model.py
+# Training with static pre-generated data
+
 import os
 import pandas as pd
 import numpy as np
 import mlflow
 import mlflow.sklearn
-from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, 
-                           f1_score, classification_report, confusion_matrix, roc_auc_score)
+                           f1_score, classification_report, roc_auc_score)
 import joblib
 import json
 from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
-# Load configuration from environment or use defaults
+# Configuration
 MLFLOW_EXPERIMENT_NAME = os.getenv('MLFLOW_EXPERIMENT_NAME', 'fraud-detection-production')
-MODEL_NAME = os.getenv('MODEL_NAME', 'fraud_detector')
 DOCKER_IMAGE_TAG = os.getenv('DOCKER_IMAGE_TAG', f'v{datetime.now().strftime("%Y%m%d-%H%M%S")}')
 
 def setup_mlflow():
     """Setup MLflow tracking"""
-    # Try to connect to MLflow server, fallback to file-based tracking
     mlflow_uri = os.getenv('MLFLOW_TRACKING_URI', 'file:./mlruns')
     mlflow.set_tracking_uri(mlflow_uri)
     
-    try:
-        # Test connection
-        mlflow.get_experiment_by_name("test")
-        print(f"✅ Connected to MLflow at: {mlflow_uri}")
-    except Exception:
-        # Fallback to file-based tracking
-        mlflow.set_tracking_uri("file:./mlruns")
-        print("⚠️ Using file-based MLflow tracking")
-    
-    # Set or create experiment
     try:
         experiment = mlflow.get_experiment_by_name(MLFLOW_EXPERIMENT_NAME)
         if experiment is None:
@@ -48,93 +39,110 @@ def setup_mlflow():
         mlflow.set_experiment(MLFLOW_EXPERIMENT_NAME)
         return experiment_id
     except Exception as e:
-        print(f"⚠️ MLflow setup warning: {e}")
+        print(f"⚠️ MLflow setup: {e}")
         return None
 
-def load_and_prepare_data():
-    """Load and prepare the training data"""
-    print("📊 Loading and preparing data...")
+def load_static_data():
+    """Load pre-generated static data from GitHub"""
+    print("📊 Loading static training data...")
     
-    # Check if data exists
+    # Check if static data exists
     if not os.path.exists("data/transactions.csv"):
-        raise FileNotFoundError("❌ Data file not found. Run generate_data.py first.")
+        raise FileNotFoundError(
+            "❌ Static data not found!\n"
+            "Please generate data first:\n"
+            "  python3 src/generate_data.py\n"
+            "  git add data/\n"
+            "  git commit -m 'Add training data'\n"
+            "  git push origin MLOPS_Change_2"
+        )
     
     # Load data
     data = pd.read_csv("data/transactions.csv")
-    print(f"📈 Loaded {len(data)} transactions")
+    print(f"📈 Loaded {len(data)} static transactions")
     
-    # Load feature mapping if available
-    feature_mapping = None
+    # Load metadata if available
+    metadata = {}
+    if os.path.exists("data/dataset_metadata.json"):
+        with open("data/dataset_metadata.json", 'r') as f:
+            metadata = json.load(f)
+        print("✅ Dataset metadata loaded")
+    
+    # Load feature mapping
+    feature_mapping = {}
     if os.path.exists("data/feature_mapping.json"):
         with open("data/feature_mapping.json", 'r') as f:
             feature_mapping = json.load(f)
         print("✅ Feature mapping loaded")
     
-    # Prepare features with one-hot encoding
-    X = pd.get_dummies(data.drop("is_fraud", axis=1))
-    y = data["is_fraud"]
+    return data, metadata, feature_mapping
+
+def prepare_features(data, feature_mapping):
+    """Prepare features using static mapping"""
+    print("🔧 Preparing features...")
     
-    # Ensure consistent feature columns if mapping exists
+    # Drop transaction_id if present
+    feature_data = data.drop(['transaction_id'], axis=1, errors='ignore')
+    
+    # Separate features and target
+    X = feature_data.drop("is_fraud", axis=1)
+    y = feature_data["is_fraud"]
+    
+    # One-hot encode categorical variables
+    X_encoded = pd.get_dummies(X, columns=['merchant', 'location', 'card_type'])
+    
+    # Ensure consistent feature columns using mapping
     if feature_mapping and 'feature_columns' in feature_mapping:
         expected_columns = feature_mapping['feature_columns']
-        # Add missing columns with zero values
+        
+        # Add missing columns
         for col in expected_columns:
-            if col not in X.columns:
-                X[col] = 0
-        # Reorder columns to match expected order
-        X = X.reindex(columns=expected_columns, fill_value=0)
+            if col not in X_encoded.columns:
+                X_encoded[col] = 0
+        
+        # Reorder columns
+        X_encoded = X_encoded.reindex(columns=expected_columns, fill_value=0)
         print(f"✅ Features aligned with mapping ({len(expected_columns)} features)")
     
-    print(f"📈 Features ({len(X.columns)}): {list(X.columns)[:10]}...")
+    print(f"📈 Final features: {len(X_encoded.columns)}")
     print(f"📊 Fraud rate: {y.mean():.2%}")
     
-    return X, y, feature_mapping
+    return X_encoded, y
 
-def train_and_evaluate_model(model, model_name, X_train, X_test, y_train, y_test, 
-                           feature_names, use_scaling=False):
-    """Train and evaluate a single model with comprehensive metrics"""
+def train_model(model, model_name, X_train, X_test, y_train, y_test, use_scaling=False):
+    """Train and evaluate a single model"""
     
     print(f"\n📚 Training {model_name}...")
     
-    with mlflow.start_run(run_name=f"{model_name}_{DOCKER_IMAGE_TAG}") as run:
+    with mlflow.start_run(run_name=f"{model_name}_{DOCKER_IMAGE_TAG}"):
         
-        # Scale features if needed (for logistic regression)
+        # Scale features if needed
         if use_scaling:
             scaler = StandardScaler()
             X_train_processed = scaler.fit_transform(X_train)
             X_test_processed = scaler.transform(X_test)
+            
             # Save scaler
-            joblib.dump(scaler, f'models/{model_name}_scaler.pkl')
-            mlflow.log_artifact(f'models/{model_name}_scaler.pkl')
+            os.makedirs('models', exist_ok=True)
+            scaler_path = f'models/{model_name}_scaler.pkl'
+            joblib.dump(scaler, scaler_path)
         else:
             X_train_processed = X_train
             X_test_processed = X_test
+            scaler_path = None
         
         # Log parameters
-        if hasattr(model, 'get_params'):
-            params = model.get_params()
-            mlflow.log_params(params)
-        
         mlflow.log_param("model_name", model_name)
         mlflow.log_param("docker_tag", DOCKER_IMAGE_TAG)
         mlflow.log_param("train_size", len(X_train))
         mlflow.log_param("test_size", len(X_test))
-        mlflow.log_param("features_count", len(feature_names))
         mlflow.log_param("scaling_used", use_scaling)
         
         # Train model
         model.fit(X_train_processed, y_train)
         
-        # Cross-validation
-        cv_scores = cross_val_score(model, X_train_processed, y_train, cv=5, scoring='accuracy')
-        mlflow.log_metric("cv_accuracy_mean", cv_scores.mean())
-        mlflow.log_metric("cv_accuracy_std", cv_scores.std())
-        
         # Make predictions
         y_pred = model.predict(X_test_processed)
-        y_pred_proba = None
-        if hasattr(model, 'predict_proba'):
-            y_pred_proba = model.predict_proba(X_test_processed)[:, 1]
         
         # Calculate metrics
         accuracy = accuracy_score(y_test, y_pred)
@@ -142,43 +150,22 @@ def train_and_evaluate_model(model, model_name, X_train, X_test, y_train, y_test
         recall = recall_score(y_test, y_pred, average='weighted')
         f1 = f1_score(y_test, y_pred, average='weighted')
         
+        # AUC if probability available
+        auc = 0.0
+        if hasattr(model, 'predict_proba'):
+            y_pred_proba = model.predict_proba(X_test_processed)[:, 1]
+            auc = roc_auc_score(y_test, y_pred_proba)
+        
         # Log metrics
         mlflow.log_metric("accuracy", accuracy)
         mlflow.log_metric("precision", precision)
         mlflow.log_metric("recall", recall)
         mlflow.log_metric("f1_score", f1)
-        
-        # ROC AUC if probabilities available
-        if y_pred_proba is not None:
-            auc = roc_auc_score(y_test, y_pred_proba)
+        if auc > 0:
             mlflow.log_metric("roc_auc", auc)
         
-        # Classification report
-        class_report = classification_report(y_test, y_pred, output_dict=True)
-        mlflow.log_dict(class_report, f"{model_name}_classification_report.json")
-        
-        # Confusion matrix
-        cm = confusion_matrix(y_test, y_pred)
-        mlflow.log_dict({
-            "confusion_matrix": cm.tolist(),
-            "labels": ["legitimate", "fraud"]
-        }, f"{model_name}_confusion_matrix.json")
-        
-        # Feature importance (if available)
-        if hasattr(model, 'feature_importances_'):
-            feature_importance = pd.DataFrame({
-                'feature': feature_names,
-                'importance': model.feature_importances_
-            }).sort_values('importance', ascending=False)
-            
-            # Log top 20 features
-            top_features = feature_importance.head(20).to_dict('records')
-            mlflow.log_dict(top_features, f"{model_name}_feature_importance.json")
-        
-        # Create input example for model signature
+        # Log model
         sample_input = X_test.iloc[:5] if hasattr(X_test, 'iloc') else X_test[:5]
-        
-        # Log model with signature
         signature = mlflow.models.infer_signature(X_train, y_pred)
         mlflow.sklearn.log_model(
             model, 
@@ -187,69 +174,55 @@ def train_and_evaluate_model(model, model_name, X_train, X_test, y_train, y_test
             input_example=sample_input
         )
         
-        print(f"✅ {model_name} - Accuracy: {accuracy:.4f}, F1: {f1:.4f}, AUC: {auc:.4f if y_pred_proba is not None else 'N/A'}")
+        auc_str = f"{auc:.4f}" if auc > 0 else "N/A"
+        print(f"✅ {model_name} - Accuracy: {accuracy:.4f}, F1: {f1:.4f}, AUC: {auc_str}")
         
         return {
             'model': model,
             'accuracy': accuracy,
             'f1_score': f1,
-            'auc': auc if y_pred_proba is not None else 0,
-            'run_id': run.info.run_id,
+            'auc': auc,
+            'run_id': mlflow.active_run().info.run_id,
             'model_name': model_name,
-            'scaler': f'models/{model_name}_scaler.pkl' if use_scaling else None
+            'scaler': scaler_path
         }
 
 def train_models():
-    """Main training function"""
-    print(f"🚀 Starting model training for experiment: {MLFLOW_EXPERIMENT_NAME}")
+    """Main training function using static data"""
+    print(f"🚀 Training models with static data - Experiment: {MLFLOW_EXPERIMENT_NAME}")
     
     # Setup MLflow
-    experiment_id = setup_mlflow()
+    setup_mlflow()
     
-    # Load and prepare data
-    X, y, feature_mapping = load_and_prepare_data()
+    # Load static data
+    data, metadata, feature_mapping = load_static_data()
     
-    # Train-test split with stratification
+    # Prepare features
+    X, y = prepare_features(data, feature_mapping)
+    
+    # Train-test split
     X_train, X_test, y_train, y_test = train_test_split(
         X, y, test_size=0.2, random_state=42, stratify=y
     )
     
-    print(f"📊 Training set: {len(X_train)} samples")
-    print(f"📊 Test set: {len(X_test)} samples")
+    print(f"📊 Training: {len(X_train)} samples, Testing: {len(X_test)} samples")
     
-    # Define models with optimized hyperparameters
+    # Define models
     models = {
         "random_forest": {
-            'model': RandomForestClassifier(
-                n_estimators=100, 
-                max_depth=10,
-                min_samples_split=5,
-                min_samples_leaf=2,
-                random_state=42,
-                n_jobs=-1
-            ),
+            'model': RandomForestClassifier(n_estimators=100, random_state=42),
             'use_scaling': False
         },
         "logistic_regression": {
-            'model': LogisticRegression(
-                max_iter=1000, 
-                random_state=42,
-                solver='liblinear',
-                class_weight='balanced'
-            ),
+            'model': LogisticRegression(max_iter=1000, random_state=42),
             'use_scaling': True
         },
         "gradient_boosting": {
-            'model': GradientBoostingClassifier(
-                n_estimators=100, 
-                max_depth=6,
-                learning_rate=0.1,
-                random_state=42
-            ),
+            'model': GradientBoostingClassifier(n_estimators=100, random_state=42),
             'use_scaling': False
         }
     }
-
+    
     print(f"\n🔄 Training {len(models)} models...")
     
     results = []
@@ -257,40 +230,32 @@ def train_models():
     # Train all models
     for name, config in models.items():
         try:
-            result = train_and_evaluate_model(
-                config['model'], 
-                name, 
-                X_train, X_test, y_train, y_test,
-                list(X.columns),
-                config['use_scaling']
+            result = train_model(
+                config['model'], name, X_train, X_test, y_train, y_test, config['use_scaling']
             )
             results.append(result)
-            
         except Exception as e:
             print(f"❌ Error training {name}: {e}")
             continue
     
     if not results:
-        raise Exception("❌ No models were successfully trained")
+        raise Exception("❌ No models trained successfully")
     
-    # Find best model (using F1 score as primary metric)
+    # Find best model
     best_result = max(results, key=lambda x: x['f1_score'])
     
     print(f"\n🏆 TRAINING COMPLETE")
     print(f"✅ Best model: {best_result['model_name']}")
     print(f"✅ Best F1 score: {best_result['f1_score']:.4f}")
     print(f"✅ Best accuracy: {best_result['accuracy']:.4f}")
-    print(f"✅ Run ID: {best_result['run_id']}")
     
-    # Save best model and metadata
+    # Save best model
     os.makedirs("models", exist_ok=True)
-    
-    # Save the best model
     joblib.dump(best_result['model'], "models/best_model.pkl")
-    print(f"✅ Best model saved to: models/best_model.pkl")
+    print(f"✅ Model saved: models/best_model.pkl")
     
-    # Save model metadata
-    metadata = {
+    # Save metadata
+    model_metadata = {
         'best_model': best_result['model_name'],
         'accuracy': float(best_result['accuracy']),
         'f1_score': float(best_result['f1_score']),
@@ -299,33 +264,22 @@ def train_models():
         'docker_tag': DOCKER_IMAGE_TAG,
         'features': list(X.columns),
         'n_features': len(X.columns),
-        'fraud_rate': float(y.mean()),
-        'train_size': len(X_train),
-        'test_size': len(X_test),
         'timestamp': datetime.now().isoformat(),
-        'scaler_path': best_result.get('scaler'),
-        'mlflow_experiment': MLFLOW_EXPERIMENT_NAME
+        'data_source': 'static_dataset',
+        'train_size': len(X_train),
+        'test_size': len(X_test)
     }
     
     with open('models/model_metadata.json', 'w') as f:
-        json.dump(metadata, f, indent=2)
+        json.dump(model_metadata, f, indent=2)
     
     print("✅ Model metadata saved")
-    
-    # Print summary of all models
-    print(f"\n📊 Model Performance Summary:")
-    print("-" * 60)
-    for result in sorted(results, key=lambda x: x['f1_score'], reverse=True):
-        print(f"{result['model_name']:20} | F1: {result['f1_score']:.4f} | Acc: {result['accuracy']:.4f} | AUC: {result['auc']:.4f}")
-    
     return best_result
 
 if __name__ == "__main__":
     try:
-        best_model_result = train_models()
-        print(f"\n🎉 Training completed successfully!")
-        print(f"Best model: {best_model_result['model_name']}")
-        print(f"Docker tag: {DOCKER_IMAGE_TAG}")
+        best_model = train_models()
+        print(f"\n🎉 Training successful! Best model: {best_model['model_name']}")
     except Exception as e:
         print(f"❌ Training failed: {e}")
         exit(1)
