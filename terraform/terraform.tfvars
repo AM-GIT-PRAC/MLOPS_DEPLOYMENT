@@ -18,7 +18,7 @@ cluster_name = "fraud-detection-cluster"
 
 # Node Group Configuration - Single instance for testing
 node_group_name = "eks-node-group"
-instance_type   = "t3.small"
+instance_type   = "t2.large"
 desired_size    = 1
 min_size        = 1
 max_size        = 2
